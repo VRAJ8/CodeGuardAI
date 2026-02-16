@@ -1,0 +1,518 @@
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import axios from "axios";
+import { API } from "@/App";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
+import { 
+  Shield, ArrowLeft, AlertTriangle, Bug, FileCode, 
+  ExternalLink, Trash2, Clock, CheckCircle, XCircle,
+  ChevronDown, ChevronUp, Code2
+} from "lucide-react";
+import { toast } from "sonner";
+import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
+
+export default function AnalysisDetail() {
+  const navigate = useNavigate();
+  const { id } = useParams();
+  const [analysis, setAnalysis] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [expandedRisks, setExpandedRisks] = useState({});
+
+  useEffect(() => {
+    fetchAnalysis();
+  }, [id]);
+
+  const fetchAnalysis = async () => {
+    try {
+      const response = await axios.get(`${API}/analysis/${id}`);
+      setAnalysis(response.data);
+    } catch (error) {
+      console.error("Error fetching analysis:", error);
+      toast.error("Failed to load analysis");
+      navigate("/dashboard");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm("Are you sure you want to delete this analysis?")) return;
+    
+    try {
+      await axios.delete(`${API}/analysis/${id}`);
+      toast.success("Analysis deleted");
+      navigate("/dashboard");
+    } catch (error) {
+      toast.error("Failed to delete analysis");
+    }
+  };
+
+  const toggleRisk = (path) => {
+    setExpandedRisks(prev => ({ ...prev, [path]: !prev[path] }));
+  };
+
+  const getScoreColor = (score) => {
+    if (score >= 80) return "#00E599";
+    if (score >= 60) return "#F59E0B";
+    return "#FF4D4D";
+  };
+
+  const getSeverityColor = (severity) => {
+    switch (severity) {
+      case "critical": return "#FF4D4D";
+      case "high": return "#F59E0B";
+      case "medium": return "#6366F1";
+      case "low": return "#00E599";
+      default: return "#A1A1AA";
+    }
+  };
+
+  const languageColors = {
+    python: "#3572A5",
+    javascript: "#F7DF1E",
+    typescript: "#3178C6",
+    java: "#B07219",
+    go: "#00ADD8",
+    rust: "#DEA584",
+    unknown: "#6366F1"
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-[#00E599] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!analysis) return null;
+
+  const languageData = analysis.metrics?.languages ? 
+    Object.entries(analysis.metrics.languages).map(([name, value]) => ({
+      name,
+      value,
+      color: languageColors[name] || languageColors.unknown
+    })) : [];
+
+  const severityCounts = {
+    critical: analysis.security_issues?.filter(i => i.severity === "critical").length || 0,
+    high: analysis.security_issues?.filter(i => i.severity === "high").length || 0,
+    medium: analysis.security_issues?.filter(i => i.severity === "medium").length || 0,
+    low: analysis.security_issues?.filter(i => i.severity === "low").length || 0,
+  };
+
+  return (
+    <div className="min-h-screen bg-[#050505]" data-testid="analysis-detail">
+      {/* Navigation */}
+      <nav className="fixed top-0 left-0 right-0 z-50 glass border-b border-white/5">
+        <div className="max-w-7xl mx-auto px-6 md:px-12">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center gap-4">
+              <Button 
+                variant="ghost" 
+                size="icon"
+                onClick={() => navigate("/dashboard")}
+                className="btn-ghost"
+                data-testid="back-btn"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </Button>
+              <div>
+                <div className="font-bold text-lg tracking-tight">{analysis.name}</div>
+                <div className="text-xs text-[#A1A1AA]">
+                  {new Date(analysis.created_at).toLocaleString()}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {analysis.source_url && (
+                <Button 
+                  variant="ghost" 
+                  className="btn-ghost"
+                  onClick={() => window.open(analysis.source_url, "_blank")}
+                  data-testid="view-source-btn"
+                >
+                  <ExternalLink className="w-4 h-4 mr-2" />
+                  View Source
+                </Button>
+              )}
+              <Button 
+                variant="ghost" 
+                className="btn-ghost text-[#FF4D4D] hover:text-[#FF4D4D] hover:bg-[#FF4D4D]/10"
+                onClick={handleDelete}
+                data-testid="delete-btn"
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      {/* Main Content */}
+      <main className="pt-24 pb-12 px-6 md:px-12">
+        <div className="max-w-7xl mx-auto">
+          {/* Score Overview */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+            {/* Overall Score */}
+            <div className="md:col-span-1 card-dark p-6" data-testid="overall-score">
+              <div className="text-center">
+                <div className="relative w-32 h-32 mx-auto mb-4">
+                  <svg className="w-full h-full transform -rotate-90">
+                    <circle
+                      cx="64"
+                      cy="64"
+                      r="56"
+                      fill="none"
+                      stroke="#171717"
+                      strokeWidth="8"
+                    />
+                    <circle
+                      cx="64"
+                      cy="64"
+                      r="56"
+                      fill="none"
+                      stroke={getScoreColor(analysis.overall_score)}
+                      strokeWidth="8"
+                      strokeDasharray={`${(analysis.overall_score / 100) * 352} 352`}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span 
+                      className="text-4xl font-bold"
+                      style={{ color: getScoreColor(analysis.overall_score) }}
+                    >
+                      {analysis.overall_score?.toFixed(0)}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-sm text-[#A1A1AA]">Overall Score</div>
+              </div>
+            </div>
+
+            {/* Metrics */}
+            <div className="md:col-span-3 grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="card-dark p-4" data-testid="metric-files">
+                <FileCode className="w-5 h-5 text-[#6366F1] mb-2" />
+                <div className="text-2xl font-bold">{analysis.metrics?.total_files || 0}</div>
+                <div className="text-xs text-[#A1A1AA]">Files Analyzed</div>
+              </div>
+              <div className="card-dark p-4" data-testid="metric-lines">
+                <Code2 className="w-5 h-5 text-[#00E599] mb-2" />
+                <div className="text-2xl font-bold">{analysis.metrics?.total_lines?.toLocaleString() || 0}</div>
+                <div className="text-xs text-[#A1A1AA]">Lines of Code</div>
+              </div>
+              <div className="card-dark p-4" data-testid="metric-issues">
+                <AlertTriangle className="w-5 h-5 text-[#FF4D4D] mb-2" />
+                <div className="text-2xl font-bold">{analysis.security_issues?.length || 0}</div>
+                <div className="text-xs text-[#A1A1AA]">Security Issues</div>
+              </div>
+              <div className="card-dark p-4" data-testid="metric-risks">
+                <Bug className="w-5 h-5 text-[#F59E0B] mb-2" />
+                <div className="text-2xl font-bold">{analysis.bug_risks?.length || 0}</div>
+                <div className="text-xs text-[#A1A1AA]">Bug Risks</div>
+              </div>
+            </div>
+          </div>
+
+          {/* AI Summary */}
+          {analysis.ai_summary && (
+            <div className="card-dark p-6 mb-8 border-l-4 border-[#00E599]" data-testid="ai-summary">
+              <h3 className="text-lg font-medium mb-2 flex items-center gap-2">
+                <Shield className="w-5 h-5 text-[#00E599]" />
+                AI Analysis Summary
+              </h3>
+              <p className="text-[#A1A1AA]">{analysis.ai_summary}</p>
+              {analysis.recommendations?.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-sm font-medium mb-2">Recommendations:</h4>
+                  <ul className="space-y-2">
+                    {analysis.recommendations.map((rec, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-[#A1A1AA]">
+                        <CheckCircle className="w-4 h-4 text-[#00E599] mt-0.5 shrink-0" />
+                        {rec}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tabs */}
+          <Tabs defaultValue="security" className="w-full">
+            <TabsList className="bg-[#0A0A0A] border border-[#27272A] rounded-sm p-1 mb-6">
+              <TabsTrigger 
+                value="security" 
+                className="data-[state=active]:bg-[#171717] data-[state=active]:text-white rounded-sm"
+                data-testid="tab-security"
+              >
+                <AlertTriangle className="w-4 h-4 mr-2" />
+                Security Issues ({analysis.security_issues?.length || 0})
+              </TabsTrigger>
+              <TabsTrigger 
+                value="bugs"
+                className="data-[state=active]:bg-[#171717] data-[state=active]:text-white rounded-sm"
+                data-testid="tab-bugs"
+              >
+                <Bug className="w-4 h-4 mr-2" />
+                Bug Risks ({analysis.bug_risks?.length || 0})
+              </TabsTrigger>
+              <TabsTrigger 
+                value="metrics"
+                className="data-[state=active]:bg-[#171717] data-[state=active]:text-white rounded-sm"
+                data-testid="tab-metrics"
+              >
+                <FileCode className="w-4 h-4 mr-2" />
+                Metrics
+              </TabsTrigger>
+            </TabsList>
+
+            {/* Security Issues Tab */}
+            <TabsContent value="security">
+              {/* Severity Summary */}
+              <div className="grid grid-cols-4 gap-4 mb-6">
+                {Object.entries(severityCounts).map(([severity, count]) => (
+                  <div 
+                    key={severity}
+                    className={`card-dark p-4 border-l-4`}
+                    style={{ borderLeftColor: getSeverityColor(severity) }}
+                  >
+                    <div className="text-2xl font-bold">{count}</div>
+                    <div className="text-xs text-[#A1A1AA] capitalize">{severity}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Issues List */}
+              <div className="space-y-3">
+                {analysis.security_issues?.length > 0 ? (
+                  analysis.security_issues.map((issue, i) => (
+                    <div 
+                      key={i}
+                      className="card-dark p-4"
+                      data-testid={`security-issue-${i}`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-start gap-3">
+                          <div 
+                            className="px-2 py-1 rounded-sm text-xs font-medium uppercase"
+                            style={{ 
+                              backgroundColor: `${getSeverityColor(issue.severity)}20`,
+                              color: getSeverityColor(issue.severity),
+                              border: `1px solid ${getSeverityColor(issue.severity)}30`
+                            }}
+                          >
+                            {issue.severity}
+                          </div>
+                          <div>
+                            <div className="font-medium">{issue.type}</div>
+                            <div className="text-sm text-[#A1A1AA] mt-1">
+                              <code className="bg-[#171717] px-2 py-0.5 rounded-sm">
+                                {issue.file_path}
+                                {issue.line_number && `:${issue.line_number}`}
+                              </code>
+                            </div>
+                            <p className="text-sm text-[#A1A1AA] mt-2">{issue.description}</p>
+                            <div className="flex items-start gap-2 mt-3 p-3 bg-[#171717] rounded-sm">
+                              <CheckCircle className="w-4 h-4 text-[#00E599] mt-0.5 shrink-0" />
+                              <span className="text-sm text-[#A1A1AA]">{issue.recommendation}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="card-dark p-12 text-center">
+                    <CheckCircle className="w-12 h-12 text-[#00E599] mx-auto mb-4" />
+                    <p className="text-[#A1A1AA]">No security issues detected!</p>
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+
+            {/* Bug Risks Tab */}
+            <TabsContent value="bugs">
+              <div className="space-y-3">
+                {analysis.bug_risks?.length > 0 ? (
+                  analysis.bug_risks
+                    .sort((a, b) => b.risk_score - a.risk_score)
+                    .map((risk, i) => (
+                      <div 
+                        key={i}
+                        className="card-dark overflow-hidden"
+                        data-testid={`bug-risk-${i}`}
+                      >
+                        <div 
+                          className="p-4 cursor-pointer"
+                          onClick={() => toggleRisk(risk.file_path)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <Bug 
+                                className="w-5 h-5"
+                                style={{ color: getScoreColor(100 - risk.risk_score) }}
+                              />
+                              <div>
+                                <div className="font-mono text-sm">{risk.file_path}</div>
+                                <div className="text-xs text-[#A1A1AA] mt-1">
+                                  Complexity: <span className="capitalize">{risk.complexity}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <div className="text-right">
+                                <div 
+                                  className="text-lg font-bold"
+                                  style={{ color: getScoreColor(100 - risk.risk_score) }}
+                                >
+                                  {risk.risk_score.toFixed(0)}%
+                                </div>
+                                <div className="text-xs text-[#A1A1AA]">Risk</div>
+                              </div>
+                              {expandedRisks[risk.file_path] ? (
+                                <ChevronUp className="w-5 h-5 text-[#A1A1AA]" />
+                              ) : (
+                                <ChevronDown className="w-5 h-5 text-[#A1A1AA]" />
+                              )}
+                            </div>
+                          </div>
+                          <div className="mt-3">
+                            <Progress 
+                              value={risk.risk_score} 
+                              className="h-2 bg-[#171717]"
+                            />
+                          </div>
+                        </div>
+                        {expandedRisks[risk.file_path] && risk.issues?.length > 0 && (
+                          <div className="px-4 pb-4 border-t border-[#27272A]">
+                            <div className="pt-4 space-y-2">
+                              {risk.issues.map((issue, j) => (
+                                <div key={j} className="flex items-start gap-2 text-sm">
+                                  <XCircle className="w-4 h-4 text-[#FF4D4D] mt-0.5 shrink-0" />
+                                  <span className="text-[#A1A1AA]">{issue}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                ) : (
+                  <div className="card-dark p-12 text-center">
+                    <CheckCircle className="w-12 h-12 text-[#00E599] mx-auto mb-4" />
+                    <p className="text-[#A1A1AA]">No high-risk files detected!</p>
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+
+            {/* Metrics Tab */}
+            <TabsContent value="metrics">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Language Distribution */}
+                <div className="card-dark p-6" data-testid="language-distribution">
+                  <h3 className="text-lg mb-4">Language Distribution</h3>
+                  {languageData.length > 0 ? (
+                    <>
+                      <ResponsiveContainer width="100%" height={200}>
+                        <PieChart>
+                          <Pie
+                            data={languageData}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={80}
+                            paddingAngle={2}
+                            dataKey="value"
+                          >
+                            {languageData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip 
+                            contentStyle={{ 
+                              background: '#0A0A0A', 
+                              border: '1px solid #27272A',
+                              borderRadius: '2px'
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="flex flex-wrap gap-3 mt-4">
+                        {languageData.map((lang) => (
+                          <div key={lang.name} className="flex items-center gap-2 text-sm">
+                            <div 
+                              className="w-3 h-3 rounded-sm" 
+                              style={{ backgroundColor: lang.color }} 
+                            />
+                            <span className="capitalize">{lang.name}</span>
+                            <span className="text-[#A1A1AA]">({lang.value} lines)</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="h-[200px] flex items-center justify-center text-[#A1A1AA]">
+                      No language data
+                    </div>
+                  )}
+                </div>
+
+                {/* Quality Metrics */}
+                <div className="card-dark p-6" data-testid="quality-metrics">
+                  <h3 className="text-lg mb-4">Quality Metrics</h3>
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex items-center justify-between text-sm mb-2">
+                        <span className="text-[#A1A1AA]">Maintainability Index</span>
+                        <span 
+                          className="font-medium"
+                          style={{ color: getScoreColor(analysis.metrics?.maintainability_index || 0) }}
+                        >
+                          {analysis.metrics?.maintainability_index?.toFixed(0) || 0}%
+                        </span>
+                      </div>
+                      <Progress 
+                        value={analysis.metrics?.maintainability_index || 0} 
+                        className="h-2 bg-[#171717]"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between text-sm mb-2">
+                        <span className="text-[#A1A1AA]">Average Complexity</span>
+                        <span className="font-medium">
+                          {analysis.metrics?.avg_complexity?.toFixed(1) || 0}
+                        </span>
+                      </div>
+                      <Progress 
+                        value={Math.min(analysis.metrics?.avg_complexity || 0, 100)} 
+                        className="h-2 bg-[#171717]"
+                      />
+                    </div>
+                    <div className="pt-4 border-t border-[#27272A]">
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <div className="text-[#A1A1AA]">Total Files</div>
+                          <div className="text-xl font-bold">{analysis.metrics?.total_files || 0}</div>
+                        </div>
+                        <div>
+                          <div className="text-[#A1A1AA]">Total Lines</div>
+                          <div className="text-xl font-bold">{analysis.metrics?.total_lines?.toLocaleString() || 0}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+        </div>
+      </main>
+    </div>
+  );
+}

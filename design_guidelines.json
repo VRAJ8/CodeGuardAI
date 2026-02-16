@@ -1,0 +1,162 @@
+{
+  "identity": {
+    "name": "E1",
+    "archetype": "The Anti-AI Designer",
+    "mission": "Create a 'Dark Control Room' aesthetic that feels like a high-end developer tool, not a generic SaaS.",
+    "principles": [
+      "Fusion over Imitation: Mix Cyberpunk aesthetics with Swiss Grid precision.",
+      "Emotion First: Evoke 'Control' and 'Insight'.",
+      "Content is King: Data is the hero. Code is the art.",
+      "Zoom In: Focus on the code diffs and risk metrics.",
+      "Negative Space: Use black space to make neon accents pop.",
+      "Contrast: High contrast text for readability in dark mode."
+    ]
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Azeret Mono, monospace",
+      "body": "Manrope, sans-serif",
+      "code": "JetBrains Mono, monospace"
+    },
+    "weights": {
+      "headings": "700 (Bold) or 300 (Light) - Avoid Regular",
+      "body": "400 (Regular), 500 (Medium)",
+      "code": "400 (Regular)"
+    },
+    "sizes": {
+      "h1": "text-5xl md:text-7xl tracking-tighter leading-none",
+      "h2": "text-3xl md:text-5xl tracking-tight",
+      "h3": "text-xl md:text-2xl tracking-tight",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm tracking-wide uppercase"
+    },
+    "installation": "Import from Google Fonts: https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@300;700&family=JetBrains+Mono:wght@400&family=Manrope:wght@400;500;700&display=swap"
+  },
+  "colors": {
+    "theme": "dark",
+    "palette": {
+      "background": "#050505",
+      "surface": "#0A0A0A",
+      "surface_highlight": "#171717",
+      "primary": "#00E599",
+      "primary_foreground": "#000000",
+      "secondary": "#6366F1",
+      "secondary_foreground": "#FFFFFF",
+      "accent": "#D4D4D8",
+      "muted": "#27272A",
+      "border": "#27272A",
+      "danger": "#FF4D4D",
+      "warning": "#F59E0B",
+      "success": "#00E599",
+      "text_primary": "#EDEDED",
+      "text_secondary": "#A1A1AA"
+    },
+    "gradients": {
+      "hero_glow": "radial-gradient(circle at 50% 50%, rgba(0, 229, 153, 0.15), transparent 70%)",
+      "border_beam": "linear-gradient(90deg, transparent, #00E599, transparent)"
+    },
+    "rules": [
+      "Never use pure black (#000000) for backgrounds, use #050505.",
+      "Use Neon Mint (#00E599) sparingly for primary actions and success states.",
+      "Use Danger Red (#FF4D4D) for high-risk bugs.",
+      "Borders should be subtle (#27272A) unless active/focused."
+    ]
+  },
+  "layout": {
+    "spacing_scale": [
+      "p-1", "p-2", "p-4", "p-6", "p-8", "p-12", "p-16", "p-24", "p-32"
+    ],
+    "container_padding": "px-6 md:px-12 lg:px-24",
+    "grids": {
+      "landing": "Tetris Grid: grid-cols-1 md:grid-cols-12 gap-8. Mix col-span-4, col-span-8, and col-span-full.",
+      "dashboard": "Control Room Grid: grid-cols-1 md:grid-cols-4 gap-4. Dense, minimal gaps."
+    },
+    "border_radius": {
+      "default": "rounded-none",
+      "buttons": "rounded-sm",
+      "cards": "rounded-sm"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#00E599] text-black hover:bg-[#00CC88] rounded-sm font-bold tracking-tight shadow-[0_0_15px_rgba(0,229,153,0.3)] transition-all hover:shadow-[0_0_25px_rgba(0,229,153,0.5)]",
+      "secondary": "bg-transparent border border-[#27272A] text-[#EDEDED] hover:border-[#EDEDED] rounded-sm transition-colors",
+      "ghost": "text-[#A1A1AA] hover:text-[#EDEDED] hover:bg-[#171717] rounded-sm"
+    },
+    "cards": {
+      "style": "bg-[#0A0A0A] border border-[#27272A] rounded-sm p-6 hover:border-[#3F3F46] transition-colors",
+      "glass": "bg-black/40 backdrop-blur-xl border border-white/10"
+    },
+    "inputs": {
+      "style": "bg-[#050505] border border-[#27272A] focus:border-[#00E599] focus:ring-1 focus:ring-[#00E599] rounded-sm text-[#EDEDED] placeholder:text-[#52525B]"
+    },
+    "navigation": {
+      "style": "Fixed top, glassmorphism (bg-black/60 backdrop-blur-md), border-b border-white/5"
+    }
+  },
+  "visual_enhancers": {
+    "textures": "Add a subtle noise texture overlay (opacity 0.03) to the entire app to reduce digital flatness.",
+    "effects": [
+      "Tracing Beam: Animate a gradient border around key cards on hover.",
+      "Scanlines: Optional subtle CRT scanline effect on code blocks."
+    ],
+    "icons": "Lucide React (default). Use thin strokes (1.5px) to match the technical vibe."
+  },
+  "motion": {
+    "transitions": "transition-all duration-300 ease-out",
+    "hover": "translate-y-[-2px]",
+    "loading": "Use a 'terminal cursor' blinking effect or a minimalist progress bar. No spinning circles."
+  },
+  "accessibility": {
+    "contrast": "Ensure text is #EDEDED on dark backgrounds. Use #A1A1AA for secondary text, never darker.",
+    "focus": "Visible focus ring using #00E599.",
+    "testing": "All interactive elements must have data-testid attribute."
+  },
+  "image_urls": {
+    "hero_background": {
+      "url": "https://images.unsplash.com/photo-1607184023678-63ea486d62cd?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Nzh8MHwxfHNlYXJjaHwxfHxmdXR1cmlzdGljJTIwZGF0YSUyMGNlbnRlciUyMG5lb24lMjBsaWdodHN8ZW58MHx8fGJsYWNrfDE3NjY3MzM2Mzd8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Futuristic city/data center with neon lights. Use as a darkened background for the Hero section with an overlay.",
+      "category": "hero"
+    },
+    "feature_structure": {
+      "url": "https://images.unsplash.com/photo-1553954004-bfd9c929f040?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Nzh8MHwxfHNlYXJjaHwyfHxmdXR1cmlzdGljJTIwZGF0YSUyMGNlbnRlciUyMG5lb24lMjBsaWdodHN8ZW58MHx8fGJsYWNrfDE3NjY3MzM2Mzd8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Concrete pathway with light. Use for 'Architecture/Structure' feature section.",
+      "category": "feature"
+    },
+    "developer_focus": {
+      "url": "https://images.unsplash.com/photo-1618422168439-4b03d3a05b15?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwxfHxzb2Z0d2FyZSUyMGRldmVsb3BlciUyMGNvZGluZyUyMG11bHRpcGxlJTIwc2NyZWVuc3xlbnwwfHx8fDE3NjY3MzM2Mzl8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Clean developer setup with code on screen. Use for 'Developer Experience' section.",
+      "category": "social_proof"
+    },
+    "team_collaboration": {
+      "url": "https://images.unsplash.com/photo-1656680632373-e2aec264296b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwyfHxzb2Z0d2FyZSUyMGRldmVsb3BlciUyMGNvZGluZyUyMG11bHRpcGxlJTIwc2NyZWVuc3xlbnwwfHx8fDE3NjY3MzM2Mzl8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Dual monitors with code. Use for 'Team/Collaboration' section.",
+      "category": "social_proof"
+    },
+    "partner_bg": {
+      "url": "https://images.unsplash.com/photo-1623305464543-b224da93e482?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NjZ8MHwxfHNlYXJjaHwyfHxtaW5pbWFsaXN0JTIwdGVjaCUyMGNvbXBhbnklMjBsb2dvJTIwd2hpdGUlMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc2NjczMzY0MXww&ixlib=rb-4.1.0&q=85",
+      "description": "Minimalist white cards. Use as a background or texture for the 'Partners/Integrations' section.",
+      "category": "sponsors"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Implement the 'Dark Control Room' theme. This is NOT a standard white SaaS.",
+    "Use the provided Google Fonts (Azeret Mono, Manrope, JetBrains Mono).",
+    "Ensure all interactive elements have data-testid attributes.",
+    "Use the 'Tetris Grid' for the landing page and 'Control Room Grid' for the dashboard.",
+    "Use the provided image URLs for their respective sections.",
+    "Do not use gradients for backgrounds, only for subtle glows or borders.",
+    "Use Shadcn components but customize them to match the 'Dark Control Room' aesthetic (remove rounded-xl, use rounded-sm).",
+    "For charts, use Recharts with the custom palette (Primary: #00E599, Danger: #FF4D4D).",
+    "Create a 'design_system.css' or update 'index.css' with the new variables immediately."
+  ],
+  "universal_guidelines": [
+    "Avoid generic 'AI slop' designs.",
+    "No 'Inter' font for headings.",
+    "No full-screen gradients.",
+    "Use 2-3x more spacing than usual.",
+    "Always include micro-interactions (hover, focus, active).",
+    "Respect 'prefers-reduced-motion'.",
+    "Use 'sonner' for toasts."
+  ]
+}

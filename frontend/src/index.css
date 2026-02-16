@@ -1,0 +1,266 @@
+@import url('https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@300;700&family=JetBrains+Mono:wght@400&family=Manrope:wght@400;500;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Dark Control Room Theme */
+:root {
+    --background: 0 0% 2%;
+    --foreground: 0 0% 93%;
+    --card: 0 0% 4%;
+    --card-foreground: 0 0% 93%;
+    --popover: 0 0% 4%;
+    --popover-foreground: 0 0% 93%;
+    --primary: 157 100% 45%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 239 84% 67%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 240 5% 65%;
+    --accent: 240 5% 84%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 70% 65%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 15%;
+    --input: 0 0% 15%;
+    --ring: 157 100% 45%;
+    --radius: 0.125rem;
+    --chart-1: 157 100% 45%;
+    --chart-2: 0 70% 65%;
+    --chart-3: 45 93% 47%;
+    --chart-4: 239 84% 67%;
+    --chart-5: 280 65% 60%;
+}
+
+* {
+    @apply border-border;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    @apply bg-[#050505] text-[#EDEDED];
+    font-family: 'Manrope', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Typography */
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Azeret Mono', monospace;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #0A0A0A;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #27272A;
+    border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #3F3F46;
+}
+
+/* Noise Texture Overlay */
+.noise-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+/* Glow Effects */
+.glow-primary {
+    box-shadow: 0 0 15px rgba(0, 229, 153, 0.3);
+}
+
+.glow-primary-hover:hover {
+    box-shadow: 0 0 25px rgba(0, 229, 153, 0.5);
+}
+
+.glow-danger {
+    box-shadow: 0 0 15px rgba(255, 77, 77, 0.3);
+}
+
+/* Terminal Cursor Blink */
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+
+.cursor-blink {
+    animation: blink 1s infinite;
+}
+
+/* Fade In Animation */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.5s ease-out forwards;
+}
+
+/* Stagger Animation */
+.stagger-1 { animation-delay: 0.1s; }
+.stagger-2 { animation-delay: 0.2s; }
+.stagger-3 { animation-delay: 0.3s; }
+.stagger-4 { animation-delay: 0.4s; }
+.stagger-5 { animation-delay: 0.5s; }
+
+/* Hero Glow */
+.hero-glow {
+    background: radial-gradient(circle at 50% 50%, rgba(0, 229, 153, 0.15), transparent 70%);
+}
+
+/* Tracing Border Animation */
+@keyframes border-beam {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+}
+
+.border-beam {
+    position: relative;
+    overflow: hidden;
+}
+
+.border-beam::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    background: linear-gradient(90deg, transparent, #00E599, transparent);
+    background-size: 200% 100%;
+    animation: border-beam 3s linear infinite;
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+}
+
+/* Glass Effect */
+.glass {
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+/* Card Hover Effect */
+.card-hover {
+    transition: all 0.3s ease-out;
+}
+
+.card-hover:hover {
+    transform: translateY(-2px);
+    border-color: #3F3F46;
+}
+
+/* Score Ring */
+.score-ring {
+    stroke-dasharray: 283;
+    stroke-dashoffset: 283;
+    transition: stroke-dashoffset 1s ease-out;
+}
+
+/* Risk Bar */
+.risk-bar {
+    transition: width 0.8s ease-out;
+}
+
+/* Pulse Animation */
+@keyframes pulse-glow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.pulse-glow {
+    animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Custom Button Styles */
+.btn-primary {
+    @apply bg-[#00E599] text-black hover:bg-[#00CC88] rounded-sm font-bold tracking-tight transition-all;
+    box-shadow: 0 0 15px rgba(0, 229, 153, 0.3);
+}
+
+.btn-primary:hover {
+    box-shadow: 0 0 25px rgba(0, 229, 153, 0.5);
+}
+
+.btn-secondary {
+    @apply bg-transparent border border-[#27272A] text-[#EDEDED] hover:border-[#EDEDED] rounded-sm transition-colors;
+}
+
+.btn-ghost {
+    @apply text-[#A1A1AA] hover:text-[#EDEDED] hover:bg-[#171717] rounded-sm transition-colors;
+}
+
+/* Card Styles */
+.card-dark {
+    @apply bg-[#0A0A0A] border border-[#27272A] rounded-sm transition-colors;
+}
+
+.card-dark:hover {
+    @apply border-[#3F3F46];
+}
+
+/* Input Styles */
+.input-dark {
+    @apply bg-[#050505] border border-[#27272A] focus:border-[#00E599] focus:ring-1 focus:ring-[#00E599] rounded-sm text-[#EDEDED] placeholder:text-[#52525B];
+}
+
+/* Badge Styles */
+.badge-critical {
+    @apply bg-[#FF4D4D]/20 text-[#FF4D4D] border border-[#FF4D4D]/30;
+}
+
+.badge-high {
+    @apply bg-[#F59E0B]/20 text-[#F59E0B] border border-[#F59E0B]/30;
+}
+
+.badge-medium {
+    @apply bg-[#6366F1]/20 text-[#6366F1] border border-[#6366F1]/30;
+}
+
+.badge-low {
+    @apply bg-[#00E599]/20 text-[#00E599] border border-[#00E599]/30;
+}
+
+/* Prevent FOUC */
+.no-fouc {
+    visibility: hidden;
+}
+
+.no-fouc.loaded {
+    visibility: visible;
+}
+
+@layer base {
+    [data-debug-wrapper="true"] {
+        display: contents !important;
+    }
+}
