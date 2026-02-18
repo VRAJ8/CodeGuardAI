@@ -10,12 +10,17 @@ export default function Landing() {
   const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
-    // Check if already authenticated
+    // FIX: Modified checkAuth to handle guest users silently
     const checkAuth = async () => {
       try {
-        await axios.get(`${API}/auth/me`);
-        navigate("/dashboard");
-      } catch {
+        const response = await axios.get(`${API}/auth/me`);
+        // If the user has a valid session, move them to the dashboard automatically
+        if (response.data) {
+          navigate("/dashboard");
+        }
+      } catch (error) {
+        // FAIL SILENTLY: Guest users will hit this 401 error. 
+        // We just stop the loading state and show them the landing page normally.
         setIsChecking(false);
       }
     };
@@ -279,7 +284,7 @@ function processData(input) {
             <span className="font-bold">CodeGuard AI</span>
           </div>
           <div className="text-sm text-[#A1A1AA]">
-            © 2024 CodeGuard AI. Built with GPT-5.2
+            © 2026 CodeGuard AI. Built with GPT-5.2
           </div>
         </div>
       </footer>
