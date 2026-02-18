@@ -379,60 +379,67 @@ def calculate_bug_risk(content: str, file_path: str, language: str) -> BugRisk:
         issues=issues
     )
 
+import google.generativeai as genai
+
 async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityIssue], existing_risks: List[BugRisk]) -> dict:
-    """Use modern google-genai SDK to analyze code and provide insights"""
+    """Analyze code using Google Gemini (Standard Library) with Fallback"""
     
     api_key = os.environ.get("EMERGENT_LLM_KEY")
     if not api_key:
         return {"summary": "AI key not configured", "recommendations": []}
 
     try:
-        # 1. Initialize modern client
-        client = genai.Client(api_key=api_key)
+        # 1. Configure the standard client
+        genai.configure(api_key=api_key)
         
-        # 2. Prepare data context
-        code_context = "\n".join([f"File: {f.path}\nContent snippet: {f.content[:800]}" for f in files[:5]])
-        issues_context = "\n".join([f"- {i.type} at {i.file_path}" for i in existing_issues[:10]])
+        # 2. Prepare context
+        code_context = "\n".join([f"File: {f.path}\nSnippet: {f.content[:800]}" for f in files[:4]])
+        issues_context = "\n".join([f"- {i.type} in {i.file_path}" for i in existing_issues[:5]])
         
         prompt = f"""
-        Act as a Senior Developer reviewing this code.
+        Review this code as a Senior Engineer.
         
-        SAMPLES:
+        FILES:
         {code_context}
         
-        ISSUES FOUND:
+        ISSUES:
         {issues_context}
         
-        Return ONLY a JSON object:
+        Respond in JSON:
         {{
-          "summary": "2 sentences about the unique quality of this specific code.",
-          "recommendations": ["Point 1", "Point 2", "Point 3", "Point 4", "Point 5"]
+          "summary": "2 sentences on code quality.",
+          "recommendations": ["Actionable tip 1", "Actionable tip 2", "Actionable tip 3", "Actionable tip 4", "Actionable tip 5"]
         }}
         """
 
-        # 3. Use the correct model identifier
-        # Note: 'gemini-1.5-flash' is the standard identifier. 
-        # If this fails, the SDK handles 'models/' internally usually.
-        response = client.models.generate_content(
-            model='gemini-1.5-flash', 
-            contents=prompt
-        )
-        
-        # 4. Clean and Parse JSON response
+        # 3. Try the primary model (Flash)
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(prompt)
+        except Exception:
+            # Fallback to Pro if Flash 404s (common in some regions/keys)
+            logging.warning("Gemini Flash failed, falling back to Pro")
+            model = genai.GenerativeModel('gemini-pro')
+            response = model.generate_content(prompt)
+
+        # 4. Parse Response
         raw_text = response.text.strip()
-        # Remove any markdown formatting if present
         if "```json" in raw_text:
             raw_text = raw_text.split("```json")[1].split("```")[0].strip()
         elif "```" in raw_text:
             raw_text = raw_text.split("```")[1].strip()
             
         return json.loads(raw_text)
-        
+
     except Exception as e:
-        logging.error(f"Gemini API Error: {e}")
+        logging.error(f"AI Analysis failed: {e}")
         return {
-            "summary": "Analysis completed using local heuristics due to AI service error.",
-            "recommendations": ["Review the detected security issues manually", "Check code complexity metrics"]
+            "summary": "AI analysis temporarily unavailable (Using local heuristics).",
+            "recommendations": [
+                "Manually review the high-severity security issues listed below.",
+                "Refactor complex functions identified in the Bug Risk section.",
+                "Ensure all API keys are moved to environment variables."
+            ]
         }
 
 # ==================== ANALYSIS ENDPOINTS ====================
