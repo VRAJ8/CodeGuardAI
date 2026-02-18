@@ -380,49 +380,50 @@ def calculate_bug_risk(content: str, file_path: str, language: str) -> BugRisk:
         issues=issues
     )
 
-# FIX: Completely rewritten AI function to match standard library usage
 async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityIssue], existing_risks: List[BugRisk]) -> dict:
-    """Analyze code using Google Gemini (Standard Library) with Fallback"""
+    """Analyze code using Google Gemini with dynamic model selection"""
     
     api_key = os.environ.get("EMERGENT_LLM_KEY")
     if not api_key:
         return {"summary": "AI key not configured", "recommendations": []}
 
     try:
-        # 1. Configure the standard client (NOT genai.Client)
         genai.configure(api_key=api_key)
         
-        # 2. Prepare context
-        code_context = "\n".join([f"File: {f.path}\nSnippet: {f.content[:800]}" for f in files[:4]])
-        issues_context = "\n".join([f"- {i.type} in {i.file_path}" for i in existing_issues[:5]])
+        # Prepare content
+        code_context = "\n".join([f"File: {f.path}\nSnippet: {f.content[:800]}" for f in files[:3]])
+        issues_context = "\n".join([f"- {i.type}" for i in existing_issues[:5]])
         
         prompt = f"""
-        Review this code as a Senior Engineer.
+        Review this code snippet.
+        FILES: {code_context}
+        ISSUES: {issues_context}
         
-        FILES:
-        {code_context}
-        
-        ISSUES:
-        {issues_context}
-        
-        Respond in JSON:
+        Return JSON:
         {{
           "summary": "2 sentences on code quality.",
-          "recommendations": ["Actionable tip 1", "Actionable tip 2", "Actionable tip 3", "Actionable tip 4", "Actionable tip 5"]
+          "recommendations": ["Tip 1", "Tip 2", "Tip 3", "Tip 4", "Tip 5"]
         }}
         """
 
-        # 3. Try the primary model (Flash) with fallback
-        try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content(prompt)
-        except Exception:
-            # Fallback to Pro if Flash 404s
-            logging.warning("Gemini Flash failed, falling back to Pro")
-            model = genai.GenerativeModel('gemini-pro')
-            response = model.generate_content(prompt)
+        # Try a list of known valid models in order
+        candidate_models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
+        response = None
+        
+        for model_name in candidate_models:
+            try:
+                logging.info(f"Attempting to use model: {model_name}")
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(prompt)
+                break # If successful, stop trying
+            except Exception as e:
+                logging.warning(f"Model {model_name} failed: {e}")
+                continue
 
-        # 4. Parse Response
+        if not response:
+            raise Exception("All Gemini models failed to generate content.")
+
+        # Clean and parse
         raw_text = response.text.strip()
         if "```json" in raw_text:
             raw_text = raw_text.split("```json")[1].split("```")[0].strip()
@@ -432,13 +433,13 @@ async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityI
         return json.loads(raw_text)
 
     except Exception as e:
-        logging.error(f"AI Analysis failed: {e}")
+        logging.error(f"AI Analysis completely failed: {e}")
         return {
-            "summary": "AI analysis temporarily unavailable (Using local heuristics).",
+            "summary": "AI analysis unavailable. Please review the security issues manually.",
             "recommendations": [
-                "Manually review the high-severity security issues listed below.",
-                "Refactor complex functions identified in the Bug Risk section.",
-                "Ensure all API keys are moved to environment variables."
+                "Fix high severity security issues immediately.",
+                "Reduce function complexity.",
+                "Add unit tests for critical paths."
             ]
         }
 
