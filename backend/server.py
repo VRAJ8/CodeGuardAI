@@ -378,86 +378,60 @@ def calculate_bug_risk(content: str, file_path: str, language: str) -> BugRisk:
         issues=issues
     )
 
-# FIX: Direct REST API implementation to bypass library issues
+from groq import Groq
+
+# Replace the entire analyze_with_ai function with this:
 async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityIssue], existing_risks: List[BugRisk]) -> dict:
-    """Analyze code using Gemini REST API directly"""
+    """Analyze code using Groq (Llama 3) for speed and stability"""
     
+    # You can keep the env var name 'EMERGENT_LLM_KEY' so you don't have to change Railway settings,
+    # just update the value in Railway to your new Groq key.
     api_key = os.environ.get("EMERGENT_LLM_KEY")
     if not api_key:
         return {"summary": "AI key not configured", "recommendations": []}
 
-    # Prepare context
-    code_context = "\n".join([f"File: {f.path}\nSnippet: {f.content[:800]}" for f in files[:3]])
-    issues_context = "\n".join([f"- {i.type} in {i.file_path}" for i in existing_issues[:5]])
-    
-    prompt = f"""
-    Act as a Senior Developer reviewing this code.
-    
-    SAMPLES:
-    {code_context}
-    
-    ISSUES FOUND:
-    {issues_context}
-    
-    Return ONLY a JSON object:
-    {{
-      "summary": "2 sentences about the unique quality of this specific code.",
-      "recommendations": ["Point 1", "Point 2", "Point 3", "Point 4", "Point 5"]
-    }}
-    """
+    try:
+        client = Groq(api_key=api_key)
+        
+        # Prepare context
+        code_context = "\n".join([f"File: {f.path}\nSnippet: {f.content[:1000]}" for f in files[:3]])
+        issues_context = "\n".join([f"- {i.type}" for i in existing_issues[:5]])
+        
+        prompt = f"""
+        Act as a Senior Developer. Analyze this code.
+        
+        CODE SNIPPETS:
+        {code_context}
+        
+        DETECTED ISSUES:
+        {issues_context}
+        
+        Return ONLY a JSON object with this structure:
+        {{
+          "summary": "2 sentences about the code quality.",
+          "recommendations": ["Tip 1", "Tip 2", "Tip 3", "Tip 4", "Tip 5"]
+        }}
+        """
 
-    # We will try the most common models via REST
-    # Using v1beta endpoint which is generally available
-    models_to_try = [
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "gemini-pro"
-    ]
+        completion = client.chat.completions.create(
+            model="llama3-70b-8192",  # Powerful and free on Groq
+            messages=[
+                {"role": "system", "content": "You are a code analysis API that outputs only valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            response_format={"type": "json_object"} # Forces valid JSON
+        )
 
-    async with httpx.AsyncClient() as client:
-        for model in models_to_try:
-            try:
-                logging.info(f"Attempting REST call to model: {model}")
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-                
-                payload = {
-                    "contents": [{
-                        "parts": [{"text": prompt}]
-                    }]
-                }
-                
-                response = await client.post(url, json=payload, timeout=30.0)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    # Extract text from Gemini response structure
-                    raw_text = data['candidates'][0]['content']['parts'][0]['text']
-                    
-                    # Clean markdown
-                    if "```json" in raw_text:
-                        raw_text = raw_text.split("```json")[1].split("```")[0].strip()
-                    elif "```" in raw_text:
-                        raw_text = raw_text.split("```")[1].strip()
-                        
-                    return json.loads(raw_text)
-                else:
-                    logging.warning(f"Model {model} failed with status {response.status_code}: {response.text}")
-                    continue
-                    
-            except Exception as e:
-                logging.warning(f"Error calling {model}: {e}")
-                continue
+        response_content = completion.choices[0].message.content
+        return json.loads(response_content)
 
-    # If all fail
-    logging.error("All AI models failed")
-    return {
-        "summary": "AI analysis unavailable due to API connectivity issues.",
-        "recommendations": [
-            "Check your API key permissions",
-            "Review code manually for security flaws",
-            "Check the security tab for automated findings"
-        ]
-    }
+    except Exception as e:
+        logging.error(f"Groq Analysis failed: {e}")
+        return {
+            "summary": "AI analysis temporarily unavailable.",
+            "recommendations": ["Review code manually", "Check security tabs"]
+        }
 
 # ==================== ANALYSIS ENDPOINTS ====================
 
