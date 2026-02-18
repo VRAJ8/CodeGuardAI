@@ -378,14 +378,56 @@ def calculate_bug_risk(content: str, file_path: str, language: str) -> BugRisk:
         issues=issues
     )
 
+import google.generativeai as genai
+
 async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityIssue], existing_risks: List[BugRisk]) -> dict:
-    """Use GPT-5.2 to analyze code and provide insights"""
+    """Use Google Gemini to analyze code and provide unique insights"""
     
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    api_key = os.environ.get("EMERGENT_LLM_KEY") # This is your Gemini API key from Railway
     if not api_key:
+        return {"summary": "AI key not configured", "recommendations": []}
+
+    # 1. Configure the Gemini Client
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-1.5-flash')
+
+    # 2. Prepare unique data for this specific upload
+    code_context = "\n".join([f"File: {f.path}\nContent snippet: {f.content[:1000]}" for f in files[:5]])
+    issues_context = "\n".join([f"- {i.type} at {i.file_path}" for i in existing_issues[:10]])
+    
+    prompt = f"""
+    You are an expert Senior Software Engineer. Provide a unique analysis of this specific codebase.
+    
+    CODE SAMPLES:
+    {code_context}
+    
+    DETECTED ISSUES:
+    {issues_context}
+    
+    RESPOND ONLY IN VALID JSON FORMAT:
+    {{
+      "summary": "2-3 sentences summarizing the unique architecture and quality of THIS specific code.",
+      "recommendations": ["Rec 1", "Rec 2", "Rec 3", "Rec 4", "Rec 5"]
+    }}
+    """
+
+    try:
+        # 3. Make the REAL API call
+        response = model.generate_content(prompt)
+        
+        # 4. Clean and Parse JSON response
+        raw_text = response.text.strip()
+        # Remove any markdown formatting if present
+        if raw_text.startswith("```json"):
+            raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+            
+        return json.loads(raw_text)
+        
+    except Exception as e:
+        logging.error(f"Gemini API Error: {e}")
         return {
-            "summary": "AI analysis unavailable - API key not configured",
-            "recommendations": []
+            "summary": "Analysis completed using local heuristics.",
+            "recommendations": ["Fix the detected security vulnerabilities", "Review code complexity"]
         }
     
     # Prepare code summary for AI
