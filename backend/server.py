@@ -14,12 +14,10 @@ import aiofiles
 import tempfile
 import zipfile
 import io
-import httpx
+import httpx  # We will use this for the AI call
 import ast
 import re
 import json
-# FIX: Use the standard library import
-import google.generativeai as genai
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -380,68 +378,86 @@ def calculate_bug_risk(content: str, file_path: str, language: str) -> BugRisk:
         issues=issues
     )
 
+# FIX: Direct REST API implementation to bypass library issues
 async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityIssue], existing_risks: List[BugRisk]) -> dict:
-    """Analyze code using Google Gemini with dynamic model selection"""
+    """Analyze code using Gemini REST API directly"""
     
     api_key = os.environ.get("EMERGENT_LLM_KEY")
     if not api_key:
         return {"summary": "AI key not configured", "recommendations": []}
 
-    try:
-        genai.configure(api_key=api_key)
-        
-        # Prepare content
-        code_context = "\n".join([f"File: {f.path}\nSnippet: {f.content[:800]}" for f in files[:3]])
-        issues_context = "\n".join([f"- {i.type}" for i in existing_issues[:5]])
-        
-        prompt = f"""
-        Review this code snippet.
-        FILES: {code_context}
-        ISSUES: {issues_context}
-        
-        Return JSON:
-        {{
-          "summary": "2 sentences on code quality.",
-          "recommendations": ["Tip 1", "Tip 2", "Tip 3", "Tip 4", "Tip 5"]
-        }}
-        """
+    # Prepare context
+    code_context = "\n".join([f"File: {f.path}\nSnippet: {f.content[:800]}" for f in files[:3]])
+    issues_context = "\n".join([f"- {i.type} in {i.file_path}" for i in existing_issues[:5]])
+    
+    prompt = f"""
+    Act as a Senior Developer reviewing this code.
+    
+    SAMPLES:
+    {code_context}
+    
+    ISSUES FOUND:
+    {issues_context}
+    
+    Return ONLY a JSON object:
+    {{
+      "summary": "2 sentences about the unique quality of this specific code.",
+      "recommendations": ["Point 1", "Point 2", "Point 3", "Point 4", "Point 5"]
+    }}
+    """
 
-        # Try a list of known valid models in order
-        candidate_models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
-        response = None
-        
-        for model_name in candidate_models:
+    # We will try the most common models via REST
+    # Using v1beta endpoint which is generally available
+    models_to_try = [
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-pro"
+    ]
+
+    async with httpx.AsyncClient() as client:
+        for model in models_to_try:
             try:
-                logging.info(f"Attempting to use model: {model_name}")
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content(prompt)
-                break # If successful, stop trying
+                logging.info(f"Attempting REST call to model: {model}")
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                
+                payload = {
+                    "contents": [{
+                        "parts": [{"text": prompt}]
+                    }]
+                }
+                
+                response = await client.post(url, json=payload, timeout=30.0)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    # Extract text from Gemini response structure
+                    raw_text = data['candidates'][0]['content']['parts'][0]['text']
+                    
+                    # Clean markdown
+                    if "```json" in raw_text:
+                        raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+                    elif "```" in raw_text:
+                        raw_text = raw_text.split("```")[1].strip()
+                        
+                    return json.loads(raw_text)
+                else:
+                    logging.warning(f"Model {model} failed with status {response.status_code}: {response.text}")
+                    continue
+                    
             except Exception as e:
-                logging.warning(f"Model {model_name} failed: {e}")
+                logging.warning(f"Error calling {model}: {e}")
                 continue
 
-        if not response:
-            raise Exception("All Gemini models failed to generate content.")
-
-        # Clean and parse
-        raw_text = response.text.strip()
-        if "```json" in raw_text:
-            raw_text = raw_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in raw_text:
-            raw_text = raw_text.split("```")[1].strip()
-            
-        return json.loads(raw_text)
-
-    except Exception as e:
-        logging.error(f"AI Analysis completely failed: {e}")
-        return {
-            "summary": "AI analysis unavailable. Please review the security issues manually.",
-            "recommendations": [
-                "Fix high severity security issues immediately.",
-                "Reduce function complexity.",
-                "Add unit tests for critical paths."
-            ]
-        }
+    # If all fail
+    logging.error("All AI models failed")
+    return {
+        "summary": "AI analysis unavailable due to API connectivity issues.",
+        "recommendations": [
+            "Check your API key permissions",
+            "Review code manually for security flaws",
+            "Check the security tab for automated findings"
+        ]
+    }
 
 # ==================== ANALYSIS ENDPOINTS ====================
 
@@ -804,7 +820,7 @@ app.include_router(analysis_router)
 # FIX: Updated to prioritize local development and your specific Netlify domain
 origins = [
     "http://localhost:3000",
-    "[https://codeguard-ai.netlify.app](https://codeguard-ai.netlify.app)" # Add your actual Netlify URL here
+    "[https://codevigil.netlify.app](https://codevigil.netlify.app)" # Add your actual Netlify URL here
 ]
 
 app.add_middleware(
