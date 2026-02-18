@@ -18,7 +18,8 @@ import httpx
 import ast
 import re
 import json
-from google import genai
+# FIX: Use the standard library import
+import google.generativeai as genai
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -379,8 +380,7 @@ def calculate_bug_risk(content: str, file_path: str, language: str) -> BugRisk:
         issues=issues
     )
 
-import google.generativeai as genai
-
+# FIX: Completely rewritten AI function to match standard library usage
 async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityIssue], existing_risks: List[BugRisk]) -> dict:
     """Analyze code using Google Gemini (Standard Library) with Fallback"""
     
@@ -389,7 +389,7 @@ async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityI
         return {"summary": "AI key not configured", "recommendations": []}
 
     try:
-        # 1. Configure the standard client
+        # 1. Configure the standard client (NOT genai.Client)
         genai.configure(api_key=api_key)
         
         # 2. Prepare context
@@ -412,12 +412,12 @@ async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityI
         }}
         """
 
-        # 3. Try the primary model (Flash)
+        # 3. Try the primary model (Flash) with fallback
         try:
             model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content(prompt)
         except Exception:
-            # Fallback to Pro if Flash 404s (common in some regions/keys)
+            # Fallback to Pro if Flash 404s
             logging.warning("Gemini Flash failed, falling back to Pro")
             model = genai.GenerativeModel('gemini-pro')
             response = model.generate_content(prompt)
@@ -803,7 +803,7 @@ app.include_router(analysis_router)
 # FIX: Updated to prioritize local development and your specific Netlify domain
 origins = [
     "http://localhost:3000",
-    "[https://codevigil.netlify.app/](https://codevigil.netlify.app/)" # Add your actual Netlify URL here
+    "[https://codeguard-ai.netlify.app](https://codeguard-ai.netlify.app)" # Add your actual Netlify URL here
 ]
 
 app.add_middleware(
