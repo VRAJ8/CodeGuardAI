@@ -18,6 +18,7 @@ import httpx
 import ast
 import re
 import json
+from google import genai
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -378,8 +379,6 @@ def calculate_bug_risk(content: str, file_path: str, language: str) -> BugRisk:
         issues=issues
     )
 
-from google import genai
-
 async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityIssue], existing_risks: List[BugRisk]) -> dict:
     """Use modern google-genai SDK to analyze code and provide insights"""
     
@@ -396,30 +395,36 @@ async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityI
         issues_context = "\n".join([f"- {i.type} at {i.file_path}" for i in existing_issues[:10]])
         
         prompt = f"""
-        Analyze this specific codebase logic and provide unique insights.
+        Act as a Senior Developer reviewing this code.
         
-        CODE SAMPLES:
+        SAMPLES:
         {code_context}
         
-        DETECTED ISSUES:
+        ISSUES FOUND:
         {issues_context}
         
-        RESPOND ONLY IN JSON FORMAT:
+        Return ONLY a JSON object:
         {{
-          "summary": "2-3 sentences summarizing the unique architecture and quality of THIS code.",
-          "recommendations": ["Rec 1", "Rec 2", "Rec 3", "Rec 4", "Rec 5"]
+          "summary": "2 sentences about the unique quality of this specific code.",
+          "recommendations": ["Point 1", "Point 2", "Point 3", "Point 4", "Point 5"]
         }}
         """
 
-        # 3. Make call using the updated model identifier
+        # 3. Use the correct model identifier
+        # Note: 'gemini-1.5-flash' is the standard identifier. 
+        # If this fails, the SDK handles 'models/' internally usually.
         response = client.models.generate_content(
-            model="gemini-1.5-flash", 
+            model='gemini-1.5-flash', 
             contents=prompt
         )
         
+        # 4. Clean and Parse JSON response
         raw_text = response.text.strip()
-        if raw_text.startswith("```json"):
-            raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+        # Remove any markdown formatting if present
+        if "```json" in raw_text:
+            raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in raw_text:
+            raw_text = raw_text.split("```")[1].strip()
             
         return json.loads(raw_text)
         
@@ -428,59 +433,6 @@ async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityI
         return {
             "summary": "Analysis completed using local heuristics due to AI service error.",
             "recommendations": ["Review the detected security issues manually", "Check code complexity metrics"]
-        }       
-        # 4. Clean and Parse JSON response
-        raw_text = response.text.strip()
-        # Remove any markdown formatting if present
-        if raw_text.startswith("```json"):
-            raw_text = raw_text.replace("```json", "").replace("```", "").strip()
-            
-        return json.loads(raw_text)
-        
-    except Exception as e:
-        logging.error(f"Gemini API Error: {e}")
-        return {
-            "summary": "Analysis completed using local heuristics.",
-            "recommendations": ["Fix the detected security vulnerabilities", "Review code complexity"]
-        }
-    
-    # Prepare code summary for AI
-    code_summary = []
-    for f in files[:10]:  # Limit to 10 files for API limits
-        code_summary.append(f"File: {f.path}\nLanguage: {f.language}\nLines: {f.lines}\n---\n{f.content[:2000]}")
-    
-    issues_summary = "\n".join([f"- {i.severity.upper()}: {i.type} in {i.file_path}" for i in existing_issues[:20]])
-    risks_summary = "\n".join([f"- {r.file_path}: Risk {r.risk_score}% - {', '.join(r.issues[:3])}" for r in existing_risks[:10]])
-    
-    prompt = f"""Analyze this codebase and provide:
-1. A concise summary of code quality (2-3 sentences)
-2. Top 5 actionable recommendations for improvement
-
-Existing Security Issues:
-{issues_summary or "None detected"}
-
-Bug Risk Assessment:
-{risks_summary or "Low risk across all files"}
-
-Sample Code Files:
-{chr(10).join(code_summary[:3])}
-
-Respond in JSON format:
-{{"summary": "...", "recommendations": ["...", "..."]}}"""
-
-    try:
-        async with httpx.AsyncClient() as client_http:
-            # Note: This is a placeholder for the actual LLM call logic using GPT-5.2
-            # Adjust the following logic based on your specific LLM integration provider
-            return {
-                "summary": "AI analysis completed based on code heuristics and security patterns.",
-                "recommendations": ["Consider adding more unit tests", "Review security vulnerabilities detected"]
-            }
-    except Exception as e:
-        logging.error(f"AI analysis error: {e}")
-        return {
-            "summary": "AI analysis completed with basic heuristics",
-            "recommendations": ["Consider adding more unit tests", "Review security vulnerabilities detected"]
         }
 
 # ==================== ANALYSIS ENDPOINTS ====================
@@ -523,12 +475,12 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
     try:
         async with httpx.AsyncClient() as client_http:
             # Get repository contents
-            api_url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/main?recursive=1"
+            api_url = f"[https://api.github.com/repos/](https://api.github.com/repos/){owner}/{repo}/git/trees/main?recursive=1"
             resp = await client_http.get(api_url, headers={"Accept": "application/vnd.github.v3+json"})
             
             if resp.status_code == 404:
                 # Try master branch
-                api_url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/master?recursive=1"
+                api_url = f"[https://api.github.com/repos/](https://api.github.com/repos/){owner}/{repo}/git/trees/master?recursive=1"
                 resp = await client_http.get(api_url, headers={"Accept": "application/vnd.github.v3+json"})
             
             if resp.status_code != 200:
@@ -554,11 +506,11 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
                 language = detect_language(file_path)
                 
                 # Fetch file content
-                raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main/{file_path}"
+                raw_url = f"[https://raw.githubusercontent.com/](https://raw.githubusercontent.com/){owner}/{repo}/main/{file_path}"
                 file_resp = await client_http.get(raw_url)
                 
                 if file_resp.status_code == 404:
-                    raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/master/{file_path}"
+                    raw_url = f"[https://raw.githubusercontent.com/](https://raw.githubusercontent.com/){owner}/{repo}/master/{file_path}"
                     file_resp = await client_http.get(raw_url)
                 
                 if file_resp.status_code == 200:
@@ -844,7 +796,7 @@ app.include_router(analysis_router)
 # FIX: Updated to prioritize local development and your specific Netlify domain
 origins = [
     "http://localhost:3000",
-    "https://codeguard-ai.netlify.app" # Add your actual Netlify URL here
+    "[https://codevigil.netlify.app/](https://codevigil.netlify.app/)" # Add your actual Netlify URL here
 ]
 
 app.add_middleware(
