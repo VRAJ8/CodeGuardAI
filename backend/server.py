@@ -378,43 +378,57 @@ def calculate_bug_risk(content: str, file_path: str, language: str) -> BugRisk:
         issues=issues
     )
 
-import google.generativeai as genai
+from google import genai
 
 async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityIssue], existing_risks: List[BugRisk]) -> dict:
-    """Use Google Gemini to analyze code and provide unique insights"""
+    """Use modern google-genai SDK to analyze code and provide insights"""
     
-    api_key = os.environ.get("EMERGENT_LLM_KEY") # This is your Gemini API key from Railway
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
     if not api_key:
         return {"summary": "AI key not configured", "recommendations": []}
 
-    # 1. Configure the Gemini Client
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-
-    # 2. Prepare unique data for this specific upload
-    code_context = "\n".join([f"File: {f.path}\nContent snippet: {f.content[:1000]}" for f in files[:5]])
-    issues_context = "\n".join([f"- {i.type} at {i.file_path}" for i in existing_issues[:10]])
-    
-    prompt = f"""
-    You are an expert Senior Software Engineer. Provide a unique analysis of this specific codebase.
-    
-    CODE SAMPLES:
-    {code_context}
-    
-    DETECTED ISSUES:
-    {issues_context}
-    
-    RESPOND ONLY IN VALID JSON FORMAT:
-    {{
-      "summary": "2-3 sentences summarizing the unique architecture and quality of THIS specific code.",
-      "recommendations": ["Rec 1", "Rec 2", "Rec 3", "Rec 4", "Rec 5"]
-    }}
-    """
-
     try:
-        # 3. Make the REAL API call
-        response = model.generate_content(prompt)
+        # 1. Initialize modern client
+        client = genai.Client(api_key=api_key)
         
+        # 2. Prepare data context
+        code_context = "\n".join([f"File: {f.path}\nContent snippet: {f.content[:800]}" for f in files[:5]])
+        issues_context = "\n".join([f"- {i.type} at {i.file_path}" for i in existing_issues[:10]])
+        
+        prompt = f"""
+        Analyze this specific codebase logic and provide unique insights.
+        
+        CODE SAMPLES:
+        {code_context}
+        
+        DETECTED ISSUES:
+        {issues_context}
+        
+        RESPOND ONLY IN JSON FORMAT:
+        {{
+          "summary": "2-3 sentences summarizing the unique architecture and quality of THIS code.",
+          "recommendations": ["Rec 1", "Rec 2", "Rec 3", "Rec 4", "Rec 5"]
+        }}
+        """
+
+        # 3. Make call using the updated model identifier
+        response = client.models.generate_content(
+            model="gemini-1.5-flash", 
+            contents=prompt
+        )
+        
+        raw_text = response.text.strip()
+        if raw_text.startswith("```json"):
+            raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+            
+        return json.loads(raw_text)
+        
+    except Exception as e:
+        logging.error(f"Gemini API Error: {e}")
+        return {
+            "summary": "Analysis completed using local heuristics due to AI service error.",
+            "recommendations": ["Review the detected security issues manually", "Check code complexity metrics"]
+        }       
         # 4. Clean and Parse JSON response
         raw_text = response.text.strip()
         # Remove any markdown formatting if present
