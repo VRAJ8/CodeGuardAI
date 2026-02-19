@@ -69,77 +69,74 @@ export default function AnalysisDetail() {
     }
   };
 
-  const handleExportPDF = () => {
-    try {
-      const doc = new jsPDF();
-      
-      // Title
-      doc.setFontSize(22);
-      doc.setTextColor(0, 229, 153);
-      doc.text("CodeGuard AI Security Audit", 14, 20);
-      
-      // Metadata
-      doc.setFontSize(12);
-      doc.setTextColor(50, 50, 50);
-      doc.text(`Project: ${analysis.name}`, 14, 30);
-      doc.text(`Date: ${new Date(analysis.created_at).toLocaleString()}`, 14, 37);
-      doc.text(`Overall Score: ${analysis.overall_score}%`, 14, 44);
-      doc.text(`Files Analyzed: ${analysis.metrics?.total_files || 0}`, 14, 51);
+const handleExportPDF = () => {
+  try {
+    const doc = new jsPDF();
+    
+    // 1. Header & Title
+    doc.setFontSize(22);
+    doc.setTextColor(0, 229, 153);
+    doc.text("CodeGuard AI Security Audit", 14, 20);
+    
+    // 2. Metadata with safety checks
+    doc.setFontSize(12);
+    doc.setTextColor(50, 50, 50);
+    doc.text(`Project: ${analysis?.name || "Unknown Project"}`, 14, 30);
+    doc.text(`Date: ${new Date(analysis?.created_at || Date.now()).toLocaleString()}`, 14, 37);
+    doc.text(`Overall Score: ${analysis?.overall_score || 0}%`, 14, 44);
 
-      // AI Summary
-      doc.setFontSize(14);
-      doc.setTextColor(0, 0, 0);
-      doc.text("AI Executive Summary", 14, 65);
-      doc.setFontSize(10);
-      doc.setTextColor(80, 80, 80);
-      const splitSummary = doc.splitTextToSize(analysis.ai_summary || "No AI summary available.", 180);
-      doc.text(splitSummary, 14, 72);
+    // 3. AI Summary - Wrap text safely
+    doc.setFontSize(14);
+    doc.setTextColor(0, 0, 0);
+    doc.text("AI Executive Summary", 14, 60);
+    doc.setFontSize(10);
+    doc.setTextColor(80, 80, 80);
+    
+    const summaryText = analysis?.ai_summary || "No AI summary available.";
+    const splitSummary = doc.splitTextToSize(summaryText, 180);
+    doc.text(splitSummary, 14, 67);
 
-      // Vulnerabilities Table
-      const tableStartY = 75 + (splitSummary.length * 5) + 10;
-      doc.setFontSize(14);
-      doc.setTextColor(0, 0, 0);
-      doc.text("Detected Vulnerabilities", 14, tableStartY);
+    // 4. Security Issues Table - The most common fail point
+    // Calculate start Y based on summary height
+    const tableStartY = 70 + (splitSummary.length * 5) + 10;
+    doc.setFontSize(14);
+    doc.setTextColor(0, 0, 0);
+    doc.text("Detected Vulnerabilities", 14, tableStartY);
 
-      const tableData = (analysis.security_issues || []).map(issue => [
-        issue.severity.toUpperCase(),
-        issue.type,
-        issue.file_path,
-        issue.line_number || "N/A"
-      ]);
+    // Clean the data before giving it to the table
+    const tableData = (analysis?.security_issues || []).map(issue => [
+      (issue?.severity || "LOW").toUpperCase(),
+      issue?.type || "General Issue",
+      issue?.file_path || "Unknown File",
+      issue?.line_number?.toString() || "N/A"
+    ]);
 
-      if (tableData.length > 0) {
-        doc.autoTable({
-          startY: tableStartY + 5,
-          head: [["Severity", "Vulnerability", "File", "Line"]],
-          body: tableData,
-          theme: 'grid',
-          headStyles: { fillColor: [23, 23, 23] }, 
-          columnStyles: {
-            0: { cellWidth: 25, fontStyle: 'bold' },
-            1: { cellWidth: 50 },
-            2: { cellWidth: 'auto' },
-            3: { cellWidth: 15 }
-          },
-          didParseCell: function(data) {
-            if (data.section === 'body' && data.column.index === 0) {
-              if (data.cell.raw === 'CRITICAL') data.cell.styles.textColor = [255, 77, 77];
-              if (data.cell.raw === 'HIGH') data.cell.styles.textColor = [245, 158, 11];
-            }
-          }
-        });
-      } else {
-        doc.setFontSize(11);
-        doc.setTextColor(0, 229, 153);
-        doc.text("No security vulnerabilities detected. Excellent work!", 14, tableStartY + 10);
-      }
-
-      doc.save(`CodeGuard_Audit_${analysis.name}.pdf`);
-      toast.success("PDF report generated!");
-    } catch (error) {
-      toast.error("Failed to generate PDF");
+    if (tableData.length > 0) {
+      doc.autoTable({
+        startY: tableStartY + 5,
+        head: [["Severity", "Vulnerability", "File", "Line"]],
+        body: tableData,
+        theme: 'striped',
+        headStyles: { fillColor: [23, 23, 23] },
+        styles: { fontSize: 9 },
+        // Added safety check for the table drawing
+        didDrawPage: (data) => {
+          // Footer
+          doc.setFontSize(8);
+          doc.text(`Page ${doc.internal.getNumberOfPages()}`, data.settings.margin.left, doc.internal.pageSize.height - 10);
+        }
+      });
+    } else {
+      doc.text("No vulnerabilities found.", 14, tableStartY + 10);
     }
-  };
+
+    doc.save(`CodeGuard_Audit_${analysis?.name || 'Report'}.pdf`);
+    toast.success("PDF report generated!");
+  } catch (error) {
+    console.error("CRITICAL PDF ERROR:", error); // Check your F12 console for this!
+    toast.error("Failed to generate PDF. Check console for details.");
+  }
+};
 
   const toggleRisk = (path) => {
     setExpandedRisks(prev => ({ ...prev, [path]: !prev[path] }));
