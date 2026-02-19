@@ -15,12 +15,45 @@ import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, 
 import { jsPDF } from "jspdf"; // Add brackets around jsPDF
 import autoTable from "jspdf-autotable";
 
+
+
 export default function AnalysisDetail() {
   const navigate = useNavigate();
   const { id } = useParams();
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedRisks, setExpandedRisks] = useState({});
+
+  // 1. First, check if we are still fetching data from the API
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-[#00E599] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // 2. NEW SAFETY GATE: Check if 'analysis' is still null or empty
+  // This prevents the "Black Screen" crash during the split second before data arrives
+  if (!analysis || Object.keys(analysis).length === 0) {
+    return (
+      <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center text-[#A1A1AA]">
+        <div className="w-8 h-8 border-2 border-[#6366F1] border-t-transparent rounded-full animate-spin mb-4" />
+        <p className="animate-pulse font-mono text-sm tracking-widest">SYNCHRONIZING ANALYSIS DATA...</p>
+      </div>
+    );
+  }
+
+  // 3. NOW it is safe to do your calculations because we KNOW 'analysis' exists
+  const languageData = analysis.metrics?.languages ? 
+    Object.entries(analysis.metrics.languages).map(([name, value]) => ({
+      name,
+      value,
+      color: languageColors[name] || languageColors.unknown
+    })) : [];
+
+  // ... rest of your code ...
+}
 
   useEffect(() => {
     fetchAnalysis();
