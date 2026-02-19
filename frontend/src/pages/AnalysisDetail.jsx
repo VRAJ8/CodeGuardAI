@@ -8,10 +8,12 @@ import { Progress } from "@/components/ui/progress";
 import { 
   Shield, ArrowLeft, AlertTriangle, Bug, FileCode, 
   ExternalLink, Trash2, Clock, CheckCircle, XCircle,
-  ChevronDown, ChevronUp, Code2
+  ChevronDown, ChevronUp, Code2, Download, FileText, FileJson
 } from "lucide-react";
 import { toast } from "sonner";
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
+import jsPDF from "jspdf";
+import "jspdf-autotable";
 
 export default function AnalysisDetail() {
   const navigate = useNavigate();
@@ -46,6 +48,96 @@ export default function AnalysisDetail() {
       navigate("/dashboard");
     } catch (error) {
       toast.error("Failed to delete analysis");
+    }
+  };
+
+  // --- EXPORT LOGIC ---
+  const handleExportJSON = () => {
+    try {
+      const dataStr = JSON.stringify(analysis, null, 2);
+      const blob = new Blob([dataStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `CodeGuard_Audit_${analysis.name}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success("JSON report downloaded!");
+    } catch (error) {
+      toast.error("Failed to generate JSON");
+    }
+  };
+
+  const handleExportPDF = () => {
+    try {
+      const doc = new jsPDF();
+      
+      // Title
+      doc.setFontSize(22);
+      doc.setTextColor(0, 229, 153);
+      doc.text("CodeGuard AI Security Audit", 14, 20);
+      
+      // Metadata
+      doc.setFontSize(12);
+      doc.setTextColor(50, 50, 50);
+      doc.text(`Project: ${analysis.name}`, 14, 30);
+      doc.text(`Date: ${new Date(analysis.created_at).toLocaleString()}`, 14, 37);
+      doc.text(`Overall Score: ${analysis.overall_score}%`, 14, 44);
+      doc.text(`Files Analyzed: ${analysis.metrics?.total_files || 0}`, 14, 51);
+
+      // AI Summary
+      doc.setFontSize(14);
+      doc.setTextColor(0, 0, 0);
+      doc.text("AI Executive Summary", 14, 65);
+      doc.setFontSize(10);
+      doc.setTextColor(80, 80, 80);
+      const splitSummary = doc.splitTextToSize(analysis.ai_summary || "No AI summary available.", 180);
+      doc.text(splitSummary, 14, 72);
+
+      // Vulnerabilities Table
+      const tableStartY = 75 + (splitSummary.length * 5) + 10;
+      doc.setFontSize(14);
+      doc.setTextColor(0, 0, 0);
+      doc.text("Detected Vulnerabilities", 14, tableStartY);
+
+      const tableData = (analysis.security_issues || []).map(issue => [
+        issue.severity.toUpperCase(),
+        issue.type,
+        issue.file_path,
+        issue.line_number || "N/A"
+      ]);
+
+      if (tableData.length > 0) {
+        doc.autoTable({
+          startY: tableStartY + 5,
+          head: [["Severity", "Vulnerability", "File", "Line"]],
+          body: tableData,
+          theme: 'grid',
+          headStyles: { fillColor: [23, 23, 23] }, 
+          columnStyles: {
+            0: { cellWidth: 25, fontStyle: 'bold' },
+            1: { cellWidth: 50 },
+            2: { cellWidth: 'auto' },
+            3: { cellWidth: 15 }
+          },
+          didParseCell: function(data) {
+            if (data.section === 'body' && data.column.index === 0) {
+              if (data.cell.raw === 'CRITICAL') data.cell.styles.textColor = [255, 77, 77];
+              if (data.cell.raw === 'HIGH') data.cell.styles.textColor = [245, 158, 11];
+            }
+          }
+        });
+      } else {
+        doc.setFontSize(11);
+        doc.setTextColor(0, 229, 153);
+        doc.text("No security vulnerabilities detected. Excellent work!", 14, tableStartY + 10);
+      }
+
+      doc.save(`CodeGuard_Audit_${analysis.name}.pdf`);
+      toast.success("PDF report generated!");
+    } catch (error) {
+      toast.error("Failed to generate PDF");
     }
   };
 
@@ -115,7 +207,6 @@ export default function AnalysisDetail() {
                 size="icon"
                 onClick={() => navigate("/dashboard")}
                 className="btn-ghost"
-                data-testid="back-btn"
               >
                 <ArrowLeft className="w-5 h-5" />
               </Button>
@@ -126,23 +217,42 @@ export default function AnalysisDetail() {
                 </div>
               </div>
             </div>
+            
+            {/* Action Buttons */}
             <div className="flex items-center gap-2">
+              <Button 
+                variant="ghost" 
+                className="btn-ghost text-xs bg-[#171717] hover:bg-[#27272A]"
+                onClick={handleExportPDF}
+              >
+                <FileText className="w-4 h-4 mr-2 text-[#00E599]" />
+                PDF
+              </Button>
+              <Button 
+                variant="ghost" 
+                className="btn-ghost text-xs bg-[#171717] hover:bg-[#27272A]"
+                onClick={handleExportJSON}
+              >
+                <FileJson className="w-4 h-4 mr-2 text-[#6366F1]" />
+                JSON
+              </Button>
+
+              <div className="w-px h-6 bg-[#27272A] mx-2"></div>
+
               {analysis.source_url && (
                 <Button 
                   variant="ghost" 
                   className="btn-ghost"
                   onClick={() => window.open(analysis.source_url, "_blank")}
-                  data-testid="view-source-btn"
                 >
                   <ExternalLink className="w-4 h-4 mr-2" />
-                  View Source
+                  Source
                 </Button>
               )}
               <Button 
                 variant="ghost" 
                 className="btn-ghost text-[#FF4D4D] hover:text-[#FF4D4D] hover:bg-[#FF4D4D]/10"
                 onClick={handleDelete}
-                data-testid="delete-btn"
               >
                 <Trash2 className="w-4 h-4" />
               </Button>
@@ -161,19 +271,9 @@ export default function AnalysisDetail() {
               <div className="text-center">
                 <div className="relative w-32 h-32 mx-auto mb-4">
                   <svg className="w-full h-full transform -rotate-90">
+                    <circle cx="64" cy="64" r="56" fill="none" stroke="#171717" strokeWidth="8" />
                     <circle
-                      cx="64"
-                      cy="64"
-                      r="56"
-                      fill="none"
-                      stroke="#171717"
-                      strokeWidth="8"
-                    />
-                    <circle
-                      cx="64"
-                      cy="64"
-                      r="56"
-                      fill="none"
+                      cx="64" cy="64" r="56" fill="none"
                       stroke={getScoreColor(analysis.overall_score)}
                       strokeWidth="8"
                       strokeDasharray={`${(analysis.overall_score / 100) * 352} 352`}
@@ -195,22 +295,22 @@ export default function AnalysisDetail() {
 
             {/* Metrics */}
             <div className="md:col-span-3 grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="card-dark p-4" data-testid="metric-files">
+              <div className="card-dark p-4">
                 <FileCode className="w-5 h-5 text-[#6366F1] mb-2" />
                 <div className="text-2xl font-bold">{analysis.metrics?.total_files || 0}</div>
                 <div className="text-xs text-[#A1A1AA]">Files Analyzed</div>
               </div>
-              <div className="card-dark p-4" data-testid="metric-lines">
+              <div className="card-dark p-4">
                 <Code2 className="w-5 h-5 text-[#00E599] mb-2" />
                 <div className="text-2xl font-bold">{analysis.metrics?.total_lines?.toLocaleString() || 0}</div>
                 <div className="text-xs text-[#A1A1AA]">Lines of Code</div>
               </div>
-              <div className="card-dark p-4" data-testid="metric-issues">
+              <div className="card-dark p-4">
                 <AlertTriangle className="w-5 h-5 text-[#FF4D4D] mb-2" />
                 <div className="text-2xl font-bold">{analysis.security_issues?.length || 0}</div>
                 <div className="text-xs text-[#A1A1AA]">Security Issues</div>
               </div>
-              <div className="card-dark p-4" data-testid="metric-risks">
+              <div className="card-dark p-4">
                 <Bug className="w-5 h-5 text-[#F59E0B] mb-2" />
                 <div className="text-2xl font-bold">{analysis.bug_risks?.length || 0}</div>
                 <div className="text-xs text-[#A1A1AA]">Bug Risks</div>
@@ -220,7 +320,7 @@ export default function AnalysisDetail() {
 
           {/* AI Summary */}
           {analysis.ai_summary && (
-            <div className="card-dark p-6 mb-8 border-l-4 border-[#00E599]" data-testid="ai-summary">
+            <div className="card-dark p-6 mb-8 border-l-4 border-[#00E599]">
               <h3 className="text-lg font-medium mb-2 flex items-center gap-2">
                 <Shield className="w-5 h-5 text-[#00E599]" />
                 AI Analysis Summary
@@ -245,27 +345,15 @@ export default function AnalysisDetail() {
           {/* Tabs */}
           <Tabs defaultValue="security" className="w-full">
             <TabsList className="bg-[#0A0A0A] border border-[#27272A] rounded-sm p-1 mb-6">
-              <TabsTrigger 
-                value="security" 
-                className="data-[state=active]:bg-[#171717] data-[state=active]:text-white rounded-sm"
-                data-testid="tab-security"
-              >
+              <TabsTrigger value="security" className="data-[state=active]:bg-[#171717] data-[state=active]:text-white rounded-sm">
                 <AlertTriangle className="w-4 h-4 mr-2" />
                 Security Issues ({analysis.security_issues?.length || 0})
               </TabsTrigger>
-              <TabsTrigger 
-                value="bugs"
-                className="data-[state=active]:bg-[#171717] data-[state=active]:text-white rounded-sm"
-                data-testid="tab-bugs"
-              >
+              <TabsTrigger value="bugs" className="data-[state=active]:bg-[#171717] data-[state=active]:text-white rounded-sm">
                 <Bug className="w-4 h-4 mr-2" />
                 Bug Risks ({analysis.bug_risks?.length || 0})
               </TabsTrigger>
-              <TabsTrigger 
-                value="metrics"
-                className="data-[state=active]:bg-[#171717] data-[state=active]:text-white rounded-sm"
-                data-testid="tab-metrics"
-              >
+              <TabsTrigger value="metrics" className="data-[state=active]:bg-[#171717] data-[state=active]:text-white rounded-sm">
                 <FileCode className="w-4 h-4 mr-2" />
                 Metrics
               </TabsTrigger>
@@ -273,29 +361,18 @@ export default function AnalysisDetail() {
 
             {/* Security Issues Tab */}
             <TabsContent value="security">
-              {/* Severity Summary */}
               <div className="grid grid-cols-4 gap-4 mb-6">
                 {Object.entries(severityCounts).map(([severity, count]) => (
-                  <div 
-                    key={severity}
-                    className={`card-dark p-4 border-l-4`}
-                    style={{ borderLeftColor: getSeverityColor(severity) }}
-                  >
+                  <div key={severity} className={`card-dark p-4 border-l-4`} style={{ borderLeftColor: getSeverityColor(severity) }}>
                     <div className="text-2xl font-bold">{count}</div>
                     <div className="text-xs text-[#A1A1AA] capitalize">{severity}</div>
                   </div>
                 ))}
               </div>
-
-              {/* Issues List */}
               <div className="space-y-3">
                 {analysis.security_issues?.length > 0 ? (
                   analysis.security_issues.map((issue, i) => (
-                    <div 
-                      key={i}
-                      className="card-dark p-4"
-                      data-testid={`security-issue-${i}`}
-                    >
+                    <div key={i} className="card-dark p-4">
                       <div className="flex items-start justify-between">
                         <div className="flex items-start gap-3">
                           <div 
@@ -342,21 +419,11 @@ export default function AnalysisDetail() {
                   analysis.bug_risks
                     .sort((a, b) => b.risk_score - a.risk_score)
                     .map((risk, i) => (
-                      <div 
-                        key={i}
-                        className="card-dark overflow-hidden"
-                        data-testid={`bug-risk-${i}`}
-                      >
-                        <div 
-                          className="p-4 cursor-pointer"
-                          onClick={() => toggleRisk(risk.file_path)}
-                        >
+                      <div key={i} className="card-dark overflow-hidden">
+                        <div className="p-4 cursor-pointer" onClick={() => toggleRisk(risk.file_path)}>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                              <Bug 
-                                className="w-5 h-5"
-                                style={{ color: getScoreColor(100 - risk.risk_score) }}
-                              />
+                              <Bug className="w-5 h-5" style={{ color: getScoreColor(100 - risk.risk_score) }} />
                               <div>
                                 <div className="font-mono text-sm">{risk.file_path}</div>
                                 <div className="text-xs text-[#A1A1AA] mt-1">
@@ -366,26 +433,16 @@ export default function AnalysisDetail() {
                             </div>
                             <div className="flex items-center gap-4">
                               <div className="text-right">
-                                <div 
-                                  className="text-lg font-bold"
-                                  style={{ color: getScoreColor(100 - risk.risk_score) }}
-                                >
+                                <div className="text-lg font-bold" style={{ color: getScoreColor(100 - risk.risk_score) }}>
                                   {risk.risk_score.toFixed(0)}%
                                 </div>
                                 <div className="text-xs text-[#A1A1AA]">Risk</div>
                               </div>
-                              {expandedRisks[risk.file_path] ? (
-                                <ChevronUp className="w-5 h-5 text-[#A1A1AA]" />
-                              ) : (
-                                <ChevronDown className="w-5 h-5 text-[#A1A1AA]" />
-                              )}
+                              {expandedRisks[risk.file_path] ? <ChevronUp className="w-5 h-5 text-[#A1A1AA]" /> : <ChevronDown className="w-5 h-5 text-[#A1A1AA]" />}
                             </div>
                           </div>
                           <div className="mt-3">
-                            <Progress 
-                              value={risk.risk_score} 
-                              className="h-2 bg-[#171717]"
-                            />
+                            <Progress value={risk.risk_score} className="h-2 bg-[#171717]" />
                           </div>
                         </div>
                         {expandedRisks[risk.file_path] && risk.issues?.length > 0 && (
@@ -414,42 +471,24 @@ export default function AnalysisDetail() {
             {/* Metrics Tab */}
             <TabsContent value="metrics">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Language Distribution */}
-                <div className="card-dark p-6" data-testid="language-distribution">
+                <div className="card-dark p-6">
                   <h3 className="text-lg mb-4">Language Distribution</h3>
                   {languageData.length > 0 ? (
                     <>
                       <ResponsiveContainer width="100%" height={200}>
                         <PieChart>
-                          <Pie
-                            data={languageData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={60}
-                            outerRadius={80}
-                            paddingAngle={2}
-                            dataKey="value"
-                          >
+                          <Pie data={languageData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={2} dataKey="value">
                             {languageData.map((entry, index) => (
                               <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
                           </Pie>
-                          <Tooltip 
-                            contentStyle={{ 
-                              background: '#0A0A0A', 
-                              border: '1px solid #27272A',
-                              borderRadius: '2px'
-                            }}
-                          />
+                          <Tooltip contentStyle={{ background: '#0A0A0A', border: '1px solid #27272A', borderRadius: '2px' }} />
                         </PieChart>
                       </ResponsiveContainer>
                       <div className="flex flex-wrap gap-3 mt-4">
                         {languageData.map((lang) => (
                           <div key={lang.name} className="flex items-center gap-2 text-sm">
-                            <div 
-                              className="w-3 h-3 rounded-sm" 
-                              style={{ backgroundColor: lang.color }} 
-                            />
+                            <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: lang.color }} />
                             <span className="capitalize">{lang.name}</span>
                             <span className="text-[#A1A1AA]">({lang.value} lines)</span>
                           </div>
@@ -457,42 +496,28 @@ export default function AnalysisDetail() {
                       </div>
                     </>
                   ) : (
-                    <div className="h-[200px] flex items-center justify-center text-[#A1A1AA]">
-                      No language data
-                    </div>
+                    <div className="h-[200px] flex items-center justify-center text-[#A1A1AA]">No language data</div>
                   )}
                 </div>
 
-                {/* Quality Metrics */}
-                <div className="card-dark p-6" data-testid="quality-metrics">
+                <div className="card-dark p-6">
                   <h3 className="text-lg mb-4">Quality Metrics</h3>
                   <div className="space-y-4">
                     <div>
                       <div className="flex items-center justify-between text-sm mb-2">
                         <span className="text-[#A1A1AA]">Maintainability Index</span>
-                        <span 
-                          className="font-medium"
-                          style={{ color: getScoreColor(analysis.metrics?.maintainability_index || 0) }}
-                        >
+                        <span className="font-medium" style={{ color: getScoreColor(analysis.metrics?.maintainability_index || 0) }}>
                           {analysis.metrics?.maintainability_index?.toFixed(0) || 0}%
                         </span>
                       </div>
-                      <Progress 
-                        value={analysis.metrics?.maintainability_index || 0} 
-                        className="h-2 bg-[#171717]"
-                      />
+                      <Progress value={analysis.metrics?.maintainability_index || 0} className="h-2 bg-[#171717]" />
                     </div>
                     <div>
                       <div className="flex items-center justify-between text-sm mb-2">
                         <span className="text-[#A1A1AA]">Average Complexity</span>
-                        <span className="font-medium">
-                          {analysis.metrics?.avg_complexity?.toFixed(1) || 0}
-                        </span>
+                        <span className="font-medium">{analysis.metrics?.avg_complexity?.toFixed(1) || 0}</span>
                       </div>
-                      <Progress 
-                        value={Math.min(analysis.metrics?.avg_complexity || 0, 100)} 
-                        className="h-2 bg-[#171717]"
-                      />
+                      <Progress value={Math.min(analysis.metrics?.avg_complexity || 0, 100)} className="h-2 bg-[#171717]" />
                     </div>
                     <div className="pt-4 border-t border-[#27272A]">
                       <div className="grid grid-cols-2 gap-4 text-sm">
