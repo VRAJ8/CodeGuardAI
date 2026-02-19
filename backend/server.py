@@ -14,7 +14,7 @@ import aiofiles
 import tempfile
 import zipfile
 import io
-import httpx  # We will use this for the AI call
+import httpx # Using standard HTTP client for stability
 import ast
 import re
 import json
@@ -378,59 +378,73 @@ def calculate_bug_risk(content: str, file_path: str, language: str) -> BugRisk:
         issues=issues
     )
 
-from groq import Groq
-
-# Replace the entire analyze_with_ai function with this:
+# FIX: DIRECT API CALL TO GROQ (Bypassing libraries to avoid version conflicts)
 async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityIssue], existing_risks: List[BugRisk]) -> dict:
-    """Analyze code using Groq (Llama 3) for speed and stability"""
+    """Analyze code using Groq REST API directly with the latest Llama 3.3 model"""
     
-    # You can keep the env var name 'EMERGENT_LLM_KEY' so you don't have to change Railway settings,
-    # just update the value in Railway to your new Groq key.
     api_key = os.environ.get("EMERGENT_LLM_KEY")
     if not api_key:
         return {"summary": "AI key not configured", "recommendations": []}
 
+    # Prepare context
+    code_context = "\n".join([f"File: {f.path}\nSnippet: {f.content[:1000]}" for f in files[:3]])
+    issues_context = "\n".join([f"- {i.type} in {i.file_path}" for i in existing_issues[:5]])
+    
+    prompt = f"""
+    You are a Senior Software Engineer. Analyze this code snippet.
+    
+    CODE:
+    {code_context}
+    
+    ISSUES DETECTED:
+    {issues_context}
+    
+    Provide a JSON response with:
+    1. 'summary': A 2-3 sentence overview of code quality.
+    2. 'recommendations': A list of 5 actionable improvements.
+    """
+
+    # We use the updated model name here
+    model_name = "llama-3.3-70b-versatile" 
+
     try:
-        client = Groq(api_key=api_key)
-        
-        # Prepare context
-        code_context = "\n".join([f"File: {f.path}\nSnippet: {f.content[:1000]}" for f in files[:3]])
-        issues_context = "\n".join([f"- {i.type}" for i in existing_issues[:5]])
-        
-        prompt = f"""
-        Act as a Senior Developer. Analyze this code.
-        
-        CODE SNIPPETS:
-        {code_context}
-        
-        DETECTED ISSUES:
-        {issues_context}
-        
-        Return ONLY a JSON object with this structure:
-        {{
-          "summary": "2 sentences about the code quality.",
-          "recommendations": ["Tip 1", "Tip 2", "Tip 3", "Tip 4", "Tip 5"]
-        }}
-        """
-
-        completion = client.chat.completions.create(
-            model="llama3-70b-8192",  # Powerful and free on Groq
-            messages=[
-                {"role": "system", "content": "You are a code analysis API that outputs only valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            response_format={"type": "json_object"} # Forces valid JSON
-        )
-
-        response_content = completion.choices[0].message.content
-        return json.loads(response_content)
+        async with httpx.AsyncClient() as client:
+            logging.info(f"Calling Groq API with model: {model_name}")
+            
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": model_name,
+                    "messages": [
+                        {"role": "system", "content": "You are a helpful coding assistant. Output valid JSON only."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.3
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                content = data['choices'][0]['message']['content']
+                return json.loads(content)
+            else:
+                logging.error(f"Groq API Error {response.status_code}: {response.text}")
+                return {
+                    "summary": f"AI Analysis failed (Status {response.status_code}).",
+                    "recommendations": ["Review security issues manually", "Check API quota"]
+                }
 
     except Exception as e:
-        logging.error(f"Groq Analysis failed: {e}")
+        logging.error(f"AI Analysis Exception: {e}")
         return {
-            "summary": "AI analysis temporarily unavailable.",
-            "recommendations": ["Review code manually", "Check security tabs"]
+            "summary": "AI analysis temporarily unavailable due to connection error.",
+            "recommendations": ["Review code manually", "Check server logs for details"]
         }
 
 # ==================== ANALYSIS ENDPOINTS ====================
@@ -473,12 +487,12 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
     try:
         async with httpx.AsyncClient() as client_http:
             # Get repository contents
-            api_url = f"[https://api.github.com/repos/](https://api.github.com/repos/){owner}/{repo}/git/trees/main?recursive=1"
+            api_url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/main?recursive=1"
             resp = await client_http.get(api_url, headers={"Accept": "application/vnd.github.v3+json"})
             
             if resp.status_code == 404:
                 # Try master branch
-                api_url = f"[https://api.github.com/repos/](https://api.github.com/repos/){owner}/{repo}/git/trees/master?recursive=1"
+                api_url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/master?recursive=1"
                 resp = await client_http.get(api_url, headers={"Accept": "application/vnd.github.v3+json"})
             
             if resp.status_code != 200:
@@ -504,11 +518,11 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
                 language = detect_language(file_path)
                 
                 # Fetch file content
-                raw_url = f"[https://raw.githubusercontent.com/](https://raw.githubusercontent.com/){owner}/{repo}/main/{file_path}"
+                raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main/{file_path}"
                 file_resp = await client_http.get(raw_url)
                 
                 if file_resp.status_code == 404:
-                    raw_url = f"[https://raw.githubusercontent.com/](https://raw.githubusercontent.com/){owner}/{repo}/master/{file_path}"
+                    raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/master/{file_path}"
                     file_resp = await client_http.get(raw_url)
                 
                 if file_resp.status_code == 200:
@@ -794,7 +808,7 @@ app.include_router(analysis_router)
 # FIX: Updated to prioritize local development and your specific Netlify domain
 origins = [
     "http://localhost:3000",
-    "[https://codevigil.netlify.app](https://codevigil.netlify.app)" # Add your actual Netlify URL here
+    "https://codeguard-ai.netlify.app" # Add your actual Netlify URL here
 ]
 
 app.add_middleware(
