@@ -12,10 +12,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
-import { jsPDF } from "jspdf"; // Add brackets around jsPDF
+import { jsPDF } from "jspdf"; 
 import autoTable from "jspdf-autotable";
-
-
 
 export default function AnalysisDetail() {
   const navigate = useNavigate();
@@ -24,36 +22,15 @@ export default function AnalysisDetail() {
   const [loading, setLoading] = useState(true);
   const [expandedRisks, setExpandedRisks] = useState({});
 
-  // 1. First, check if we are still fetching data from the API
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#050505] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-[#00E599] border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  // 2. NEW SAFETY GATE: Check if 'analysis' is still null or empty
-  // This prevents the "Black Screen" crash during the split second before data arrives
-  if (!analysis || Object.keys(analysis).length === 0) {
-    return (
-      <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center text-[#A1A1AA]">
-        <div className="w-8 h-8 border-2 border-[#6366F1] border-t-transparent rounded-full animate-spin mb-4" />
-        <p className="animate-pulse font-mono text-sm tracking-widest">SYNCHRONIZING ANALYSIS DATA...</p>
-      </div>
-    );
-  }
-
-  // 3. NOW it is safe to do your calculations because we KNOW 'analysis' exists
-  const languageData = analysis.metrics?.languages ? 
-    Object.entries(analysis.metrics.languages).map(([name, value]) => ({
-      name,
-      value,
-      color: languageColors[name] || languageColors.unknown
-    })) : [];
-
-  // ... rest of your code ...
-}
+  const languageColors = {
+    python: "#3572A5",
+    javascript: "#F7DF1E",
+    typescript: "#3178C6",
+    java: "#B07219",
+    go: "#00ADD8",
+    rust: "#DEA584",
+    unknown: "#6366F1"
+  };
 
   useEffect(() => {
     fetchAnalysis();
@@ -102,66 +79,60 @@ export default function AnalysisDetail() {
     }
   };
 
-const handleExportPDF = () => {
-  try {
-    const doc = new jsPDF();
-    
-    // --- Header ---
-    doc.setFontSize(20);
-    doc.setTextColor(0, 229, 153);
-    doc.text("CodeGuard AI Security Audit", 14, 20);
-    
-    // --- Metadata ---
-    doc.setFontSize(10);
-    doc.setTextColor(100, 100, 100);
-    doc.text(`Project: ${analysis?.name || "N/A"}`, 14, 30);
-    doc.text(`Status: COMPLETED`, 14, 35);
-    doc.text(`Score: ${analysis?.overall_score || 0}%`, 14, 40);
+  const handleExportPDF = () => {
+    try {
+      const doc = new jsPDF();
+      
+      doc.setFontSize(20);
+      doc.setTextColor(0, 229, 153);
+      doc.text("CodeGuard AI Security Audit", 14, 20);
+      
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Project: ${analysis?.name || "N/A"}`, 14, 30);
+      doc.text(`Status: COMPLETED`, 14, 35);
+      doc.text(`Score: ${analysis?.overall_score || 0}%`, 14, 40);
 
-    // --- AI Summary ---
-    doc.setFontSize(14);
-    doc.setTextColor(0, 0, 0);
-    doc.text("AI Summary", 14, 50);
-    doc.setFontSize(10);
-    doc.setTextColor(60, 60, 60);
-    const summary = analysis?.ai_summary || "AI analysis completed based on code heuristics.";
-    const splitSummary = doc.splitTextToSize(summary, 180);
-    doc.text(splitSummary, 14, 56);
+      doc.setFontSize(14);
+      doc.setTextColor(0, 0, 0);
+      doc.text("AI Summary", 14, 50);
+      doc.setFontSize(10);
+      doc.setTextColor(60, 60, 60);
+      const summary = analysis?.ai_summary || "AI analysis completed based on code heuristics.";
+      const splitSummary = doc.splitTextToSize(summary, 180);
+      doc.text(splitSummary, 14, 56);
 
-    // --- Table Data Preparation ---
-    const tableStartY = 60 + (splitSummary.length * 5);
-    
-    // Safety check data to avoid 'undefined' crashes
-    const tableData = (analysis?.security_issues || []).map(issue => [
-      (issue?.severity || "LOW").toUpperCase(),
-      issue?.type || "General Issue",
-      issue?.file_path || "Unknown",
-      issue?.line_number?.toString() || "-"
-    ]);
+      const tableStartY = 60 + (splitSummary.length * 5);
+      
+      const tableData = (analysis?.security_issues || []).map(issue => [
+        (issue?.severity || "LOW").toUpperCase(),
+        issue?.type || "General Issue",
+        issue?.file_path || "Unknown",
+        issue?.line_number?.toString() || "-"
+      ]);
 
-    // --- STANDALONE AUTOTABLE CALL ---
-    autoTable(doc, {
-      startY: tableStartY,
-      head: [["Severity", "Issue", "File", "Line"]],
-      body: tableData,
-      theme: 'grid',
-      headStyles: { fillColor: [23, 23, 23] }, // CodeGuard dark theme
-      styles: { fontSize: 8 },
-      didParseCell: (data) => {
-        if (data.section === 'body' && data.column.index === 0) {
-          if (data.cell.raw === 'CRITICAL') data.cell.styles.textColor = [255, 77, 77];
-          if (data.cell.raw === 'HIGH') data.cell.styles.textColor = [245, 158, 11];
+      autoTable(doc, {
+        startY: tableStartY,
+        head: [["Severity", "Issue", "File", "Line"]],
+        body: tableData,
+        theme: 'grid',
+        headStyles: { fillColor: [23, 23, 23] },
+        styles: { fontSize: 8 },
+        didParseCell: (data) => {
+          if (data.section === 'body' && data.column.index === 0) {
+            if (data.cell.raw === 'CRITICAL') data.cell.styles.textColor = [255, 77, 77];
+            if (data.cell.raw === 'HIGH') data.cell.styles.textColor = [245, 158, 11];
+          }
         }
-      }
-    });
+      });
 
-    doc.save(`CodeGuard_${analysis?.name || 'Report'}.pdf`);
-    toast.success("PDF report generated!");
-  } catch (error) {
-    console.error("PDF EXPORT ERROR:", error);
-    toast.error("Generation failed. See F12 Console.");
-  }
-};
+      doc.save(`CodeGuard_${analysis?.name || 'Report'}.pdf`);
+      toast.success("PDF report generated!");
+    } catch (error) {
+      console.error("PDF EXPORT ERROR:", error);
+      toast.error("Generation failed. See F12 Console.");
+    }
+  };
 
   const toggleRisk = (path) => {
     setExpandedRisks(prev => ({ ...prev, [path]: !prev[path] }));
@@ -183,16 +154,7 @@ const handleExportPDF = () => {
     }
   };
 
-  const languageColors = {
-    python: "#3572A5",
-    javascript: "#F7DF1E",
-    typescript: "#3178C6",
-    java: "#B07219",
-    go: "#00ADD8",
-    rust: "#DEA584",
-    unknown: "#6366F1"
-  };
-
+  // --- RENDERING LOGIC ---
   if (loading) {
     return (
       <div className="min-h-screen bg-[#050505] flex items-center justify-center">
@@ -201,7 +163,14 @@ const handleExportPDF = () => {
     );
   }
 
-  if (!analysis) return null;
+  if (!analysis || Object.keys(analysis).length === 0) {
+    return (
+      <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center text-[#A1A1AA]">
+        <div className="w-8 h-8 border-2 border-[#6366F1] border-t-transparent rounded-full animate-spin mb-4" />
+        <p className="animate-pulse font-mono text-sm tracking-widest">SYNCHRONIZING ANALYSIS DATA...</p>
+      </div>
+    );
+  }
 
   const languageData = analysis.metrics?.languages ? 
     Object.entries(analysis.metrics.languages).map(([name, value]) => ({
@@ -219,7 +188,6 @@ const handleExportPDF = () => {
 
   return (
     <div className="min-h-screen bg-[#050505]" data-testid="analysis-detail">
-      {/* Navigation */}
       <nav className="fixed top-0 left-0 right-0 z-50 glass border-b border-white/5">
         <div className="max-w-7xl mx-auto px-6 md:px-12">
           <div className="flex items-center justify-between h-16">
@@ -240,7 +208,6 @@ const handleExportPDF = () => {
               </div>
             </div>
             
-            {/* Action Buttons */}
             <div className="flex items-center gap-2">
               <Button 
                 variant="ghost" 
@@ -283,13 +250,10 @@ const handleExportPDF = () => {
         </div>
       </nav>
 
-      {/* Main Content */}
       <main className="pt-24 pb-12 px-6 md:px-12">
         <div className="max-w-7xl mx-auto">
-          {/* Score Overview */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-            {/* Overall Score */}
-            <div className="md:col-span-1 card-dark p-6" data-testid="overall-score">
+            <div className="md:col-span-1 card-dark p-6">
               <div className="text-center">
                 <div className="relative w-32 h-32 mx-auto mb-4">
                   <svg className="w-full h-full transform -rotate-90">
@@ -315,7 +279,6 @@ const handleExportPDF = () => {
               </div>
             </div>
 
-            {/* Metrics */}
             <div className="md:col-span-3 grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="card-dark p-4">
                 <FileCode className="w-5 h-5 text-[#6366F1] mb-2" />
@@ -340,7 +303,6 @@ const handleExportPDF = () => {
             </div>
           </div>
 
-          {/* AI Summary */}
           {analysis.ai_summary && (
             <div className="card-dark p-6 mb-8 border-l-4 border-[#00E599]">
               <h3 className="text-lg font-medium mb-2 flex items-center gap-2">
@@ -364,7 +326,6 @@ const handleExportPDF = () => {
             </div>
           )}
 
-          {/* Tabs */}
           <Tabs defaultValue="security" className="w-full">
             <TabsList className="bg-[#0A0A0A] border border-[#27272A] rounded-sm p-1 mb-6">
               <TabsTrigger value="security" className="data-[state=active]:bg-[#171717] data-[state=active]:text-white rounded-sm">
@@ -381,7 +342,6 @@ const handleExportPDF = () => {
               </TabsTrigger>
             </TabsList>
 
-            {/* Security Issues Tab */}
             <TabsContent value="security">
               <div className="grid grid-cols-4 gap-4 mb-6">
                 {Object.entries(severityCounts).map(([severity, count]) => (
@@ -434,7 +394,6 @@ const handleExportPDF = () => {
               </div>
             </TabsContent>
 
-            {/* Bug Risks Tab */}
             <TabsContent value="bugs">
               <div className="space-y-3">
                 {analysis.bug_risks?.length > 0 ? (
@@ -490,7 +449,6 @@ const handleExportPDF = () => {
               </div>
             </TabsContent>
 
-            {/* Metrics Tab */}
             <TabsContent value="metrics">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="card-dark p-6">
