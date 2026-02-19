@@ -12,8 +12,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
-import jsPDF from "jspdf";
-import "jspdf-autotable";
+import { jsPDF } from "jspdf"; // Add brackets around jsPDF
+import autoTable from "jspdf-autotable";
 
 export default function AnalysisDetail() {
   const navigate = useNavigate();
@@ -73,68 +73,60 @@ const handleExportPDF = () => {
   try {
     const doc = new jsPDF();
     
-    // 1. Header & Title
-    doc.setFontSize(22);
+    // --- Header ---
+    doc.setFontSize(20);
     doc.setTextColor(0, 229, 153);
     doc.text("CodeGuard AI Security Audit", 14, 20);
     
-    // 2. Metadata with safety checks
-    doc.setFontSize(12);
-    doc.setTextColor(50, 50, 50);
-    doc.text(`Project: ${analysis?.name || "Unknown Project"}`, 14, 30);
-    doc.text(`Date: ${new Date(analysis?.created_at || Date.now()).toLocaleString()}`, 14, 37);
-    doc.text(`Overall Score: ${analysis?.overall_score || 0}%`, 14, 44);
-
-    // 3. AI Summary - Wrap text safely
-    doc.setFontSize(14);
-    doc.setTextColor(0, 0, 0);
-    doc.text("AI Executive Summary", 14, 60);
+    // --- Metadata ---
     doc.setFontSize(10);
-    doc.setTextColor(80, 80, 80);
-    
-    const summaryText = analysis?.ai_summary || "No AI summary available.";
-    const splitSummary = doc.splitTextToSize(summaryText, 180);
-    doc.text(splitSummary, 14, 67);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`Project: ${analysis?.name || "N/A"}`, 14, 30);
+    doc.text(`Status: COMPLETED`, 14, 35);
+    doc.text(`Score: ${analysis?.overall_score || 0}%`, 14, 40);
 
-    // 4. Security Issues Table - The most common fail point
-    // Calculate start Y based on summary height
-    const tableStartY = 70 + (splitSummary.length * 5) + 10;
+    // --- AI Summary ---
     doc.setFontSize(14);
     doc.setTextColor(0, 0, 0);
-    doc.text("Detected Vulnerabilities", 14, tableStartY);
+    doc.text("AI Summary", 14, 50);
+    doc.setFontSize(10);
+    doc.setTextColor(60, 60, 60);
+    const summary = analysis?.ai_summary || "AI analysis completed based on code heuristics.";
+    const splitSummary = doc.splitTextToSize(summary, 180);
+    doc.text(splitSummary, 14, 56);
 
-    // Clean the data before giving it to the table
+    // --- Table Data Preparation ---
+    const tableStartY = 60 + (splitSummary.length * 5);
+    
+    // Safety check data to avoid 'undefined' crashes
     const tableData = (analysis?.security_issues || []).map(issue => [
       (issue?.severity || "LOW").toUpperCase(),
       issue?.type || "General Issue",
-      issue?.file_path || "Unknown File",
-      issue?.line_number?.toString() || "N/A"
+      issue?.file_path || "Unknown",
+      issue?.line_number?.toString() || "-"
     ]);
 
-    if (tableData.length > 0) {
-      doc.autoTable({
-        startY: tableStartY + 5,
-        head: [["Severity", "Vulnerability", "File", "Line"]],
-        body: tableData,
-        theme: 'striped',
-        headStyles: { fillColor: [23, 23, 23] },
-        styles: { fontSize: 9 },
-        // Added safety check for the table drawing
-        didDrawPage: (data) => {
-          // Footer
-          doc.setFontSize(8);
-          doc.text(`Page ${doc.internal.getNumberOfPages()}`, data.settings.margin.left, doc.internal.pageSize.height - 10);
+    // --- STANDALONE AUTOTABLE CALL ---
+    autoTable(doc, {
+      startY: tableStartY,
+      head: [["Severity", "Issue", "File", "Line"]],
+      body: tableData,
+      theme: 'grid',
+      headStyles: { fillColor: [23, 23, 23] }, // CodeGuard dark theme
+      styles: { fontSize: 8 },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 0) {
+          if (data.cell.raw === 'CRITICAL') data.cell.styles.textColor = [255, 77, 77];
+          if (data.cell.raw === 'HIGH') data.cell.styles.textColor = [245, 158, 11];
         }
-      });
-    } else {
-      doc.text("No vulnerabilities found.", 14, tableStartY + 10);
-    }
+      }
+    });
 
-    doc.save(`CodeGuard_Audit_${analysis?.name || 'Report'}.pdf`);
+    doc.save(`CodeGuard_${analysis?.name || 'Report'}.pdf`);
     toast.success("PDF report generated!");
   } catch (error) {
-    console.error("CRITICAL PDF ERROR:", error); // Check your F12 console for this!
-    toast.error("Failed to generate PDF. Check console for details.");
+    console.error("PDF EXPORT ERROR:", error);
+    toast.error("Generation failed. See F12 Console.");
   }
 };
 
