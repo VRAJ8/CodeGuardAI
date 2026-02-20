@@ -18,6 +18,7 @@ import httpx # Using standard HTTP client for stability
 import ast
 import re
 import json
+from secret_scanner import SecretScanner
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -29,6 +30,7 @@ db = client[os.environ['DB_NAME']]
 
 # Create the main app
 app = FastAPI(title="CodeGuard AI - Code Reviewer & Bug Predictor")
+secret_detector = SecretScanner()
 
 # Create routers
 api_router = APIRouter(prefix="/api")
@@ -527,6 +529,22 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
                 
                 if file_resp.status_code == 200:
                     content = file_resp.text
+                    
+                    # ==========================================
+                    # NEW LEVEL-0 SECRET SCANNER INTEGRATION
+                    # ==========================================
+                    secret_findings = secret_detector.scan_content(content, file_path)
+                    for secret in secret_findings:
+                        all_security_issues.append(SecurityIssue(
+                            severity=secret["severity"],
+                            type=secret["type"],
+                            description=secret["description"],
+                            file_path=secret["file_path"],
+                            line_number=None,
+                            recommendation=secret["recommendation"]
+                        ))
+                    # ==========================================
+
                     lines = count_lines(content)
                     total_lines += lines
                     
@@ -592,7 +610,7 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
             {"$set": {"status": "failed", "ai_summary": str(e)}}
         )
         return {"analysis_id": analysis_id, "status": "failed"}
-
+        
 @analysis_router.post("/upload")
 async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_current_user)):
     """Analyze uploaded ZIP file"""
@@ -633,13 +651,11 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
         code_extensions = {".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rs", ".cpp", ".c", ".rb", ".php"}
         
         with zipfile.ZipFile(zip_buffer, 'r') as zip_file:
-            # FIX: Added recursive check and skipping MacOS system files
             for zip_info in zip_file.infolist()[:100]:
                 if zip_info.is_dir() or zip_info.filename.startswith('__MACOSX/'):
                     continue
                 
                 file_path = zip_info.filename
-                # Ensure the extension is checked against our code list
                 if Path(file_path).suffix.lower() not in code_extensions:
                     continue
                 
@@ -648,6 +664,21 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
                         file_content = f.read().decode('utf-8', errors='ignore')
                 except:
                     continue
+
+                # ==========================================
+                # NEW LEVEL-0 SECRET SCANNER INTEGRATION
+                # ==========================================
+                secret_findings = secret_detector.scan_content(file_content, file_path)
+                for secret in secret_findings:
+                    all_security_issues.append(SecurityIssue(
+                        severity=secret["severity"],
+                        type=secret["type"],
+                        description=secret["description"],
+                        file_path=secret["file_path"],
+                        line_number=None,
+                        recommendation=secret["recommendation"]
+                    ))
+                # ==========================================
                 
                 lines = count_lines(file_content)
                 total_lines += lines
@@ -669,7 +700,6 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
                 if bug_risk.risk_score > 0:
                     all_bug_risks.append(bug_risk)
         
-        # Validation for extracted files
         if not files:
             await db.analyses.update_one(
                 {"analysis_id": analysis_id},
@@ -677,10 +707,8 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
             )
             return {"analysis_id": analysis_id, "status": "failed"}
 
-        # Get AI analysis
         ai_result = await analyze_with_ai(files, all_security_issues, all_bug_risks)
         
-        # Calculate overall score
         security_penalty = len([i for i in all_security_issues if i.severity in ["critical", "high"]]) * 10
         risk_penalty = sum(r.risk_score for r in all_bug_risks) / max(len(all_bug_risks), 1) / 2
         overall_score = max(0, 100 - security_penalty - risk_penalty)
@@ -719,7 +747,7 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
             {"$set": {"status": "failed", "ai_summary": str(e)}}
         )
         return {"analysis_id": analysis_id, "status": "failed"}
-
+        
 @analysis_router.get("/list")
 async def list_analyses(user: User = Depends(get_current_user)):
     """List all analyses for the current user"""
@@ -808,7 +836,7 @@ app.include_router(analysis_router)
 # FIX: Updated to prioritize local development and your specific Netlify domain
 origins = [
     "http://localhost:3000",
-    "https://codeguard-ai.netlify.app" # Add your actual Netlify URL here
+    "https://codevigil.netlify.app" # Add your actual Netlify URL here
 ]
 
 app.add_middleware(
@@ -829,3 +857,4 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
