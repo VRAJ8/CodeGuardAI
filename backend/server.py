@@ -19,6 +19,7 @@ import ast
 import re
 import json
 from secret_scanner import SecretScanner
+from dependency_scanner import DependencyScanner
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -31,6 +32,7 @@ db = client[os.environ['DB_NAME']]
 # Create the main app
 app = FastAPI(title="CodeGuard AI - Code Reviewer & Bug Predictor")
 secret_detector = SecretScanner()
+dependency_detector = DependencyScanner()
 
 # Create routers
 api_router = APIRouter(prefix="/api")
@@ -543,6 +545,19 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
                             line_number=None,
                             recommendation=secret["recommendation"]
                         ))
+
+                if file_path.endswith("package.json"):
+                    # We use await because the OSV API call is asynchronous
+                    dep_findings = await dependency_detector.scan_package_json(content, file_path)
+                    for dep in dep_findings:
+                        all_security_issues.append(SecurityIssue(
+                            severity=dep["severity"],
+                            type=dep["type"],
+                            description=dep["description"],
+                            file_path=dep["file_path"],
+                            line_number=None,
+                            recommendation=dep["recommendation"]
+                        ))
                     # ==========================================
 
                     lines = count_lines(content)
@@ -610,7 +625,7 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
             {"$set": {"status": "failed", "ai_summary": str(e)}}
         )
         return {"analysis_id": analysis_id, "status": "failed"}
-        
+
 @analysis_router.post("/upload")
 async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_current_user)):
     """Analyze uploaded ZIP file"""
