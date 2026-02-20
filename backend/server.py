@@ -514,7 +514,7 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
             total_lines = 0
             
             # Filter and process code files
-            code_extensions = {".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rs", ".cpp", ".c", ".rb", ".php"}
+            code_extensions = {".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rs", ".cpp", ".c", ".rb", ".php", ".json"}
             code_files = [f for f in tree_data.get("tree", []) if f["type"] == "blob" and Path(f["path"]).suffix in code_extensions][:50]
             
             for file_info in code_files:
