@@ -677,7 +677,8 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
                 try:
                     with zip_file.open(zip_info) as f:
                         file_content = f.read().decode('utf-8', errors='ignore')
-                except:
+                except Exception as e:
+                    print(f"DEBUG: Failed to read {file_path}: {e}")
                     continue
 
                 # ==========================================
@@ -696,7 +697,7 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
 
                 # Dependency Scanner Integration
                 if file_path.endswith("package.json"):
-                    print(f"DEBUG: Found package.json! Sending to OSV API...") # This must show in logs
+                    print(f"DEBUG: Found package.json! Path: {file_path}") # This must show in logs
                     dep_findings = await dependency_detector.scan_package_json(file_content, file_path)
                     for dep in dep_findings:
                         all_security_issues.append(SecurityIssue(
