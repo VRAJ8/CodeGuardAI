@@ -696,6 +696,7 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
 
                 # Dependency Scanner Integration
                 if file_path.endswith("package.json"):
+                    print(f"DEBUG: Found package.json! Sending to OSV API...") # This must show in logs
                     dep_findings = await dependency_detector.scan_package_json(file_content, file_path)
                     for dep in dep_findings:
                         all_security_issues.append(SecurityIssue(
