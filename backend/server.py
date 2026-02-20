@@ -693,6 +693,19 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
                         line_number=None,
                         recommendation=secret["recommendation"]
                     ))
+
+                # Dependency Scanner Integration
+                if file_path.endswith("package.json"):
+                    dep_findings = await dependency_detector.scan_package_json(file_content, file_path)
+                    for dep in dep_findings:
+                        all_security_issues.append(SecurityIssue(
+                            severity=dep["severity"],
+                            type=dep["type"],
+                            description=dep["description"],
+                            file_path=dep["file_path"],
+                            line_number=None,
+                            recommendation=dep["recommendation"]
+                        ))    
                 # ==========================================
                 
                 lines = count_lines(file_content)
