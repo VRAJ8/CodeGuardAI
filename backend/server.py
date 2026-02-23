@@ -255,7 +255,8 @@ def detect_language(filename: str) -> str:
         ".php": "php",
         ".cs": "csharp",
         ".swift": "swift",
-        ".kt": "kotlin"
+        ".kt": "kotlin",
+        ".json": "json"
     }
     ext = Path(filename).suffix.lower()
     return ext_map.get(ext, "unknown")
@@ -663,7 +664,7 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
         language_stats = {}
         total_lines = 0
         
-        code_extensions = {".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rs", ".cpp", ".c", ".rb", ".php"}
+        code_extensions = {".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rs", ".cpp", ".c", ".rb", ".php", ".json"}
         
         with zipfile.ZipFile(zip_buffer, 'r') as zip_file:
             for zip_info in zip_file.infolist()[:100]:
