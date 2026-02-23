@@ -382,33 +382,31 @@ const [viewingFix, setViewingFix] = useState(null);
                               <span className="text-sm text-[#A1A1AA]">{issue.recommendation}</span>
                               {/* --- AI FIX SECTION --- */}
                               {/* AI Fix Integration */}
-                                  {analysis.ai_fixes && analysis.ai_fixes.find(f => f.file_path === issue.file_path && f.type === issue.type) && (
-                                    <div className="mt-4 p-4 bg-[#0A0A0A] border border-[#00E599]/20 rounded-sm">
-                                      <div className="flex items-center justify-between mb-2">
-                                        <h4 className="text-xs font-bold text-[#00E599] uppercase tracking-widest">AI Suggested Patch</h4>
-                                        <Button 
-                                          variant="ghost" 
-                                          size="sm" 
-                                          className="h-6 text-[10px] bg-[#171717]"
-                                          onClick={() => {
-                                            const fix = analysis.ai_fixes.find(f => f.file_path === issue.file_path && f.type === issue.type);
-                                            navigator.clipboard.writeText(fix.fix_code);
-                                            toast.success("Patch copied to clipboard");
-                                          }}
-                                        >
-                                          Copy Fix
-                                        </Button>
-                                      </div>
-                                      <p className="text-xs text-[#A1A1AA] mb-3 italic">
-                                        // {analysis.ai_fixes.find(f => f.file_path === issue.file_path && f.type === issue.type).explanation}
-                                      </p>
-                                      <pre className="text-[11px] font-mono text-gray-300 bg-[#050505] p-2 rounded border border-white/5 overflow-x-auto">
-                                        <code>{analysis.ai_fixes.find(f => f.file_path === issue.file_path && f.type === issue.type).fix_code}</code>
-                                      </pre>
-                                    </div>
-                                  )}
-                                </div>
-                              
+                              {analysis.ai_fixes && analysis.ai_fixes.find(f => f.file_path === issue.file_path && f.type === issue.type) && (
+                                <div className="mt-4 p-4 bg-[#0A0A0A] border border-[#00E599]/20 rounded-sm">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <h4 className="text-xs font-bold text-[#00E599] uppercase tracking-widest">AI Suggested Patch</h4>
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      className="h-6 text-[10px] bg-[#171717]"
+                                      onClick={() => {
+                                        const fix = analysis.ai_fixes.find(f => f.file_path === issue.file_path && f.type === issue.type);
+                                        navigator.clipboard.writeText(fix.fix_code);
+                                        toast.success("Patch copied to clipboard");
+                                      }}
+                                    >
+                                      Copy Fix
+                                    </Button>
+                                  </div>
+                                  <p className="text-xs text-[#A1A1AA] mb-3 italic">
+                                    // {analysis.ai_fixes.find(f => f.file_path === issue.file_path && f.type === issue.type).explanation}
+                                  </p>
+                                  <pre className="text-[11px] font-mono text-gray-300 bg-[#050505] p-2 rounded border border-white/5 overflow-x-auto">
+                                    <code>{analysis.ai_fixes.find(f => f.file_path === issue.file_path && f.type === issue.type).fix_code}</code>
+                                    </pre>
+                                  </div>
+                              )}
                             </div>
                           </div>
                         </div>
