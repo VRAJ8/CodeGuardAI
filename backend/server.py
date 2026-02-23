@@ -101,6 +101,7 @@ class AnalysisResult(BaseModel):
     overall_score: Optional[float] = None  # 0-100
     ai_summary: Optional[str] = None
     recommendations: List[str] = []
+    ai_fixes: List[Dict[str, Any]] = []
 
 # ==================== AUTH HELPERS ====================
 

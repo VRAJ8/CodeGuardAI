@@ -382,16 +382,29 @@ const [viewingFix, setViewingFix] = useState(null);
                               <span className="text-sm text-[#A1A1AA]">{issue.recommendation}</span>
                               {/* --- AI FIX SECTION --- */}
                               {/* AI Fix Integration */}
-                              {analysis.ai_fixes && analysis.ai_fixes.find(f => f.file_path === issue.file_path && f.type === issue.type) && (
-                                <div className="mt-4 p-4 bg-[#0A0A0A] border border-[#00E599]/20 rounded-sm">
+                              {analysis.ai_fixes && analysis.ai_fixes.map((fix, fixIdx) => {
+                              // Check if this fix belongs to the current issue 
+                              // We check for BOTH 'issue_type' and 'type' to be safe
+                              const isMatch = fix.file_path === issue.file_path && 
+                                              (fix.issue_type === issue.type || fix.type === issue.type);
+                              
+                              if (!isMatch) return null;
+
+                              return (
+                                <div key={fixIdx} className="mt-4 p-4 bg-[#0A0A0A] border border-[#00E599]/20 rounded-sm animate-in fade-in slide-in-from-top-1">
                                   <div className="flex items-center justify-between mb-2">
-                                    <h4 className="text-xs font-bold text-[#00E599] uppercase tracking-widest">AI Suggested Patch</h4>
+                                    <h4 className="text-xs font-bold text-[#00E599] uppercase tracking-widest flex items-center gap-2">
+                                      <span className="relative flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00E599] opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00E599]"></span>
+                                      </span>
+                                      AI Suggested Patch
+                                    </h4>
                                     <Button 
                                       variant="ghost" 
                                       size="sm" 
-                                      className="h-6 text-[10px] bg-[#171717]"
+                                      className="h-6 text-[10px] bg-[#171717] hover:bg-[#27272A] border border-white/5"
                                       onClick={() => {
-                                        const fix = analysis.ai_fixes.find(f => f.file_path === issue.file_path && f.type === issue.type);
                                         navigator.clipboard.writeText(fix.fix_code);
                                         toast.success("Patch copied to clipboard");
                                       }}
@@ -400,13 +413,14 @@ const [viewingFix, setViewingFix] = useState(null);
                                     </Button>
                                   </div>
                                   <p className="text-xs text-[#A1A1AA] mb-3 italic">
-                                    // {analysis.ai_fixes.find(f => f.file_path === issue.file_path && f.type === issue.type).explanation}
+                                    // {fix.explanation}
                                   </p>
-                                  <pre className="text-[11px] font-mono text-gray-300 bg-[#050505] p-2 rounded border border-white/5 overflow-x-auto">
-                                    <code>{analysis.ai_fixes.find(f => f.file_path === issue.file_path && f.type === issue.type).fix_code}</code>
-                                    </pre>
-                                  </div>
-                              )}
+                                  <pre className="text-[11px] font-mono text-gray-300 bg-[#050505] p-3 rounded border border-white/5 overflow-x-auto leading-relaxed">
+                                    <code>{fix.fix_code}</code>
+                                  </pre>
+                                </div>
+                              );
+                            })}
                             </div>
                           </div>
                         </div>
