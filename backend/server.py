@@ -385,72 +385,66 @@ def calculate_bug_risk(content: str, file_path: str, language: str) -> BugRisk:
 
 # FIX: DIRECT API CALL TO GROQ (Bypassing libraries to avoid version conflicts)
 async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityIssue], existing_risks: List[BugRisk]) -> dict:
-    """Analyze code using Groq REST API directly with the latest Llama 3.3 model"""
+    """Analyze code and generate specific patches for detected vulnerabilities"""
     
     api_key = os.environ.get("EMERGENT_LLM_KEY")
     if not api_key:
         return {"summary": "AI key not configured", "recommendations": []}
 
-    # Prepare context
-    code_context = "\n".join([f"File: {f.path}\nSnippet: {f.content[:1000]}" for f in files[:3]])
-    issues_context = "\n".join([f"- {i.type} in {i.file_path}" for i in existing_issues[:5]])
+    # Focus context on the files that actually have security issues
+    relevant_files = [f.path for f in existing_issues]
+    code_context = "\n".join([f"File: {f.path}\nContent:\n{f.content}" for f in files if f.path in relevant_files][:2])
+    
+    # Format the issues so the AI knows exactly what to fix
+    issues_to_fix = "\n".join([f"- Issue: {i.type} in {i.file_path} (Severity: {i.severity})" for i in existing_issues])
     
     prompt = f"""
-    You are a Senior Software Engineer. Analyze this code snippet.
+    You are a Senior Security Engineer. Analyze the provided code and the issues detected.
     
-    CODE:
+    CODE CONTENT:
     {code_context}
     
-    ISSUES DETECTED:
-    {issues_context}
+    DETECTED ISSUES:
+    {issues_to_fix}
+    
+    For each issue, you MUST provide a corrected code snippet.
     
     Provide a JSON response with:
-    1. 'summary': A 2-3 sentence overview of code quality.
-    2. 'recommendations': A list of 5 actionable improvements.
+    1. 'summary': A brief 2-sentence quality report.
+    2. 'recommendations': A list of 5 improvements.
+    3. 'fixes': A list of objects, each containing:
+       - 'issue_type': The name of the issue.
+       - 'file_path': The file it belongs to.
+       - 'explanation': Why this fix is better.
+       - 'fix_code': The exact corrected line or block of code.
     """
 
-    # We use the updated model name here
     model_name = "llama-3.3-70b-versatile" 
 
     try:
         async with httpx.AsyncClient() as client:
-            logging.info(f"Calling Groq API with model: {model_name}")
-            
             response = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json"
-                },
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={
                     "model": model_name,
                     "messages": [
-                        {"role": "system", "content": "You are a helpful coding assistant. Output valid JSON only."},
+                        {"role": "system", "content": "You are a specialized security bot. Output valid JSON only."},
                         {"role": "user", "content": prompt}
                     ],
                     "response_format": {"type": "json_object"},
-                    "temperature": 0.3
+                    "temperature": 0.2 # Lower temperature for more stable code generation
                 },
-                timeout=30.0
+                timeout=45.0 # Increased timeout for larger code generation tasks
             )
             
             if response.status_code == 200:
-                data = response.json()
-                content = data['choices'][0]['message']['content']
-                return json.loads(content)
-            else:
-                logging.error(f"Groq API Error {response.status_code}: {response.text}")
-                return {
-                    "summary": f"AI Analysis failed (Status {response.status_code}).",
-                    "recommendations": ["Review security issues manually", "Check API quota"]
-                }
+                return json.loads(response.json()['choices'][0]['message']['content'])
+            return {"summary": "AI Fix Generation failed.", "recommendations": [], "fixes": []}
 
     except Exception as e:
-        logging.error(f"AI Analysis Exception: {e}")
-        return {
-            "summary": "AI analysis temporarily unavailable due to connection error.",
-            "recommendations": ["Review code manually", "Check server logs for details"]
-        }
+        logging.error(f"AI Auto-Fix Error: {e}")
+        return {"summary": "AI analysis error.", "recommendations": [], "fixes": []}
 
 # ==================== ANALYSIS ENDPOINTS ====================
 
@@ -613,7 +607,8 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
                     "bug_risks": [r.model_dump() for r in all_bug_risks],
                     "overall_score": round(overall_score, 2),
                     "ai_summary": ai_result.get("summary", ""),
-                    "recommendations": ai_result.get("recommendations", [])
+                    "recommendations": ai_result.get("recommendations", []),
+                    "ai_fixes": ai_result.get("fixes", [])
                 }}
             )
             
@@ -765,7 +760,8 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
                 "bug_risks": [r.model_dump() for r in all_bug_risks],
                 "overall_score": round(overall_score, 2),
                 "ai_summary": ai_result.get("summary", ""),
-                "recommendations": ai_result.get("recommendations", [])
+                "recommendations": ai_result.get("recommendations", []),
+                "ai_fixes": ai_result.get("fixes", [])
             }}
         )
         
