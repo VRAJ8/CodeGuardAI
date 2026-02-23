@@ -392,7 +392,7 @@ async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityI
         return {"summary": "AI key not configured", "recommendations": []}
 
     # Focus context on the files that actually have security issues
-    relevant_files = [f.path for f in existing_issues]
+    relevant_files = [i.file_path for i in existing_issues]
     code_context = "\n".join([f"File: {f.path}\nContent:\n{f.content}" for f in files if f.path in relevant_files][:2])
     
     # Format the issues so the AI knows exactly what to fix
