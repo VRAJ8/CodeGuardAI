@@ -382,45 +382,51 @@ const [viewingFix, setViewingFix] = useState(null);
                               <span className="text-sm text-[#A1A1AA]">{issue.recommendation}</span>
                               {/* --- AI FIX SECTION --- */}
                               {/* AI Fix Integration */}
-                              {analysis.ai_fixes && analysis.ai_fixes.map((fix, fixIdx) => {
-                              // Check if this fix belongs to the current issue 
-                              // We check for BOTH 'issue_type' and 'type' to be safe
-                              const isMatch = fix.file_path === issue.file_path && 
-                                              (fix.issue_type === issue.type || fix.type === issue.type);
-                              
-                              if (!isMatch) return null;
+                              {/* Optimized AI Fix Section */}
+                              {analysis.ai_fixes && (
+                                <div className="mt-6 space-y-4">
+                                  {analysis.ai_fixes
+                                    .filter(fix => fix.file_path === issue.file_path && 
+                                                  (fix.issue_type === issue.type || fix.type === issue.type))
+                                    .slice(0, 1) // Only show the most relevant fix per issue card
+                                    .map((fix, fixIdx) => (
+                                      <div key={fixIdx} className="rounded-md border border-[#00E599]/30 bg-[#0A0A0A] overflow-hidden">
+                                        {/* Header Bar */}
+                                        <div className="flex items-center justify-between bg-[#00E599]/10 px-4 py-2 border-b border-[#00E599]/20">
+                                          <div className="flex items-center gap-2">
+                                            <div className="h-2 w-2 rounded-full bg-[#00E599] animate-pulse" />
+                                            <span className="text-[10px] font-bold text-[#00E599] uppercase tracking-wider">
+                                              AI Suggested Patch
+                                            </span>
+                                          </div>
+                                          <Button 
+                                            variant="ghost" 
+                                            size="sm" 
+                                            className="h-7 text-[10px] hover:bg-[#00E599]/20 text-[#00E599] font-semibold"
+                                            onClick={() => {
+                                              navigator.clipboard.writeText(fix.fix_code);
+                                              toast.success("Code copied!");
+                                            }}
+                                          >
+                                            <Download className="w-3 h-3 mr-1" /> Copy Fix
+                                          </Button>
+                                        </div>
 
-                              return (
-                                <div key={fixIdx} className="mt-4 p-4 bg-[#0A0A0A] border border-[#00E599]/20 rounded-sm animate-in fade-in slide-in-from-top-1">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <h4 className="text-xs font-bold text-[#00E599] uppercase tracking-widest flex items-center gap-2">
-                                      <span className="relative flex h-2 w-2">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00E599] opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00E599]"></span>
-                                      </span>
-                                      AI Suggested Patch
-                                    </h4>
-                                    <Button 
-                                      variant="ghost" 
-                                      size="sm" 
-                                      className="h-6 text-[10px] bg-[#171717] hover:bg-[#27272A] border border-white/5"
-                                      onClick={() => {
-                                        navigator.clipboard.writeText(fix.fix_code);
-                                        toast.success("Patch copied to clipboard");
-                                      }}
-                                    >
-                                      Copy Fix
-                                    </Button>
-                                  </div>
-                                  <p className="text-xs text-[#A1A1AA] mb-3 italic">
-                                    // {fix.explanation}
-                                  </p>
-                                  <pre className="text-[11px] font-mono text-gray-300 bg-[#050505] p-3 rounded border border-white/5 overflow-x-auto leading-relaxed">
-                                    <code>{fix.fix_code}</code>
-                                  </pre>
+                                        {/* Explanation & Code Block */}
+                                        <div className="p-4">
+                                          <p className="text-xs text-gray-400 mb-3 leading-relaxed">
+                                            <span className="text-[#00E599] font-semibold">Pro Tip:</span> {fix.explanation}
+                                          </p>
+                                          <div className="relative group">
+                                            <pre className="text-[11px] font-mono text-gray-300 bg-[#050505] p-4 rounded border border-white/5 overflow-x-auto leading-6">
+                                              <code>{fix.fix_code}</code>
+                                            </pre>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
                                 </div>
-                              );
-                            })}
+                              )}
                             </div>
                           </div>
                         </div>
