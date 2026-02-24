@@ -102,6 +102,7 @@ class AnalysisResult(BaseModel):
     ai_summary: Optional[str] = None
     recommendations: List[str] = []
     ai_fixes: List[Dict[str, Any]] = []
+    ai_refactors: List[Dict[str, Any]] = []
 
 # ==================== AUTH HELPERS ====================
 
@@ -386,41 +387,38 @@ def calculate_bug_risk(content: str, file_path: str, language: str) -> BugRisk:
 
 # FIX: DIRECT API CALL TO GROQ (Bypassing libraries to avoid version conflicts)
 async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityIssue], existing_risks: List[BugRisk]) -> dict:
-    """Analyze code and generate specific patches for detected vulnerabilities"""
+    """Analyze code and generate both security patches and architectural refactors"""
     
     api_key = os.environ.get("EMERGENT_LLM_KEY")
     if not api_key:
-        return {"summary": "AI key not configured", "recommendations": []}
+        return {"summary": "AI key not configured", "recommendations": [], "fixes": [], "refactors": []}
 
-    # Focus context on the files that actually have security issues
-    relevant_files = [i.file_path for i in existing_issues]
-    code_context = "\n".join([f"File: {f.path}\nContent:\n{f.content}" for f in files if f.path in relevant_files][:2])
+    # 1. Prioritize files for context (Security Issues + Top 2 Complex Files)
+    risk_paths = [r.file_path for r in sorted(existing_risks, key=lambda x: x.risk_score, reverse=True)[:2]]
+    issue_paths = [i.file_path for i in existing_issues]
+    relevant_paths = list(set(issue_paths + risk_paths))
     
-    # Format the issues so the AI knows exactly what to fix
-    issues_to_fix = "\n".join([f"- Issue: {i.type} in {i.file_path} (Severity: {i.severity})" for i in existing_issues])
+    # 2. Extract code context (limit to 3 files to stay within token limits)
+    code_context = "\n".join([f"File: {f.path}\nContent:\n{f.content}" for f in files if f.path in relevant_paths][:3])
     
     prompt = f"""
-    You are a Senior Security Engineer. Analyze the provided code and the issues detected.
+    You are a Staff Software Architect. Analyze the code and the detected issues.
     
-    CODE CONTENT:
+    CODE CONTEXT:
     {code_context}
     
-    DETECTED ISSUES:
-    {issues_to_fix}
+    SECURITY ISSUES:
+    {[i.model_dump() for i in existing_issues]}
     
-    For each issue, you MUST provide a corrected code snippet.
-    
-    Provide a JSON response with:
-    1. 'summary': A brief 2-sentence quality report.
-    2. 'recommendations': A list of 5 improvements.
-    3. 'fixes': A list of objects, each containing:
-       - 'issue_type': The name of the issue.
-       - 'file_path': The file it belongs to.
-       - 'explanation': Why this fix is better.
-       - 'fix_code': The exact corrected line or block of code.
-    """
+    COMPLEXITY RISKS:
+    {[r.model_dump() for r in existing_risks if r.file_path in risk_paths]}
 
-    model_name = "llama-3.3-70b-versatile" 
+    Provide a JSON response with:
+    1. 'summary': 2-sentence quality report.
+    2. 'recommendations': 5 bullet points for improvement.
+    3. 'fixes': List for security issues with keys: 'issue_type', 'file_path', 'explanation', 'fix_code'.
+    4. 'refactors': List for complex files with keys: 'file_path', 'explanation', 'refined_code'.
+    """
 
     try:
         async with httpx.AsyncClient() as client:
@@ -428,25 +426,23 @@ async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityI
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={
-                    "model": model_name,
+                    "model": "llama-3.3-70b-versatile",
                     "messages": [
-                        {"role": "system", "content": "You are a specialized security bot. Output valid JSON only."},
+                        {"role": "system", "content": "You are a specialized security and architecture bot. Output valid JSON only."},
                         {"role": "user", "content": prompt}
                     ],
                     "response_format": {"type": "json_object"},
-                    "temperature": 0.2 # Lower temperature for more stable code generation
+                    "temperature": 0.2
                 },
-                timeout=45.0 # Increased timeout for larger code generation tasks
+                timeout=50.0 
             )
             
             if response.status_code == 200:
                 return json.loads(response.json()['choices'][0]['message']['content'])
-            return {"summary": "AI Fix Generation failed.", "recommendations": [], "fixes": []}
-
+            return {"summary": "AI generation failed.", "recommendations": [], "fixes": [], "refactors": []}
     except Exception as e:
-        logging.error(f"AI Auto-Fix Error: {e}")
-        return {"summary": "AI analysis error.", "recommendations": [], "fixes": []}
-
+        logging.error(f"AI Phase 3 Error: {e}")
+        return {"summary": "AI analysis error.", "recommendations": [], "fixes": [], "refactors": []}
 # ==================== ANALYSIS ENDPOINTS ====================
 
 @analysis_router.post("/github")
@@ -479,7 +475,9 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
         "bug_risks": [],
         "overall_score": None,
         "ai_summary": None,
-        "recommendations": []
+        "recommendations": [],
+        "ai_fixes": ai_result.get("fixes", []),
+        "ai_refactors": ai_result.get("refactors", [])
     }
     
     await db.analyses.insert_one(analysis_doc)
@@ -645,7 +643,9 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
         "bug_risks": [],
         "overall_score": None,
         "ai_summary": None,
-        "recommendations": []
+        "recommendations": [],
+        "ai_fixes": ai_result.get("fixes", []),
+        "ai_refactors": ai_result.get("refactors", [])
     }
     
     await db.analyses.insert_one(analysis_doc)
