@@ -516,7 +516,7 @@ const [viewingFix, setViewingFix] = useState(null);
                                         <span className="text-[#6366F1] font-bold">Architect's Note:</span> {analysis.ai_refactors.find(r => r.file_path === risk.file_path).explanation}
                                       </p>
                                       <div className="relative group">
-                                        <pre className="text-[11px] font-mono text-gray-300 bg-[#050505] p-3 rounded-sm border border-white/5 overflow-x-auto max-h-80 leading-relaxed">
+                                        <pre className="text-[11px] font-mono text-gray-300 bg-[#050505] p-4 rounded-sm border border-white/5 overflow-x-auto max-h-80 leading-relaxed whitespace-pre">
                                           <code>{analysis.ai_refactors.find(r => r.file_path === risk.file_path).refined_code}</code>
                                         </pre>
                                         <Button 
