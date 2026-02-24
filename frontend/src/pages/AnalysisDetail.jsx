@@ -22,6 +22,7 @@ export default function AnalysisDetail() {
   const [loading, setLoading] = useState(true);
   const [expandedRisks, setExpandedRisks] = useState({});
   const [showRefactor, setShowRefactor] = useState({});
+  console.log("Current Refactor State:", showRefactor); //DEBBUG LINE
   // Add this near your other useState hooks (around line 24)
 const [viewingFix, setViewingFix] = useState(null);
   const languageColors = {
