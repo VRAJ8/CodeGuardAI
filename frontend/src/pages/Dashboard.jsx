@@ -224,9 +224,16 @@ export default function Dashboard() {
                         ))}
                       </Pie>
                       <RechartsTooltip 
-                        contentStyle={{ backgroundColor: '#171717', border: '1px solid #27272A', borderRadius: '4px' }}
-                        itemStyle={{ color: '#fff' }}
-                      />
+                          contentStyle={{ 
+                            backgroundColor: '#171717', 
+                            border: '1px solid #27272A', 
+                            borderRadius: '6px',
+                            color: '#E4E4E7', // This makes the title text light gray
+                            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.5)'
+                          }}
+                          itemStyle={{ color: '#00E599', fontWeight: 'bold' }} // This highlights the count number
+                          formatter={(value, name) => [value, name]} // Ensures consistent text
+                        />
                       <Legend verticalAlign="bottom" />
                     </PieChart>
                   </ResponsiveContainer>
@@ -249,9 +256,16 @@ export default function Dashboard() {
                     <XAxis dataKey="name" stroke="#A1A1AA" fontSize={12} tickLine={false} axisLine={false} />
                     <YAxis stroke="#A1A1AA" fontSize={12} tickLine={false} axisLine={false} />
                     <RechartsTooltip 
-                      cursor={{fill: '#27272A'}}
-                      contentStyle={{ backgroundColor: '#171717', border: '1px solid #27272A', borderRadius: '4px' }}
-                    />
+                        cursor={{ fill: '#171717' }} // Subtle background highlight on hover
+                        contentStyle={{ 
+                          backgroundColor: '#171717', 
+                          border: '1px solid #27272A', 
+                          borderRadius: '6px',
+                          color: '#E4E4E7', // Light text for readability
+                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.5)'
+                        }}
+                        itemStyle={{ color: '#00E599', fontWeight: 'bold' }}
+                      />
                     <Bar dataKey="count" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>

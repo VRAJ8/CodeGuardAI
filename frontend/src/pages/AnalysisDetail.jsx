@@ -7,11 +7,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { 
   Shield, ArrowLeft, AlertTriangle, Bug, FileCode, 
-  ExternalLink, Trash2, Clock, CheckCircle, XCircle,
+  ExternalLink, Trash2, CheckCircle, XCircle,
   ChevronDown, ChevronUp, Code2, Download, FileText, FileJson
 } from "lucide-react";
 import { toast } from "sonner";
-import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from "recharts";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { jsPDF } from "jspdf"; 
 import autoTable from "jspdf-autotable";
 
@@ -22,9 +22,8 @@ export default function AnalysisDetail() {
   const [loading, setLoading] = useState(true);
   const [expandedRisks, setExpandedRisks] = useState({});
   const [showRefactor, setShowRefactor] = useState({});
-  console.log("Current Refactor State:", showRefactor); //DEBBUG LINE
-  // Add this near your other useState hooks (around line 24)
-const [viewingFix, setViewingFix] = useState(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false); // NEW: Modal State
+
   const languageColors = {
     python: "#3572A5",
     javascript: "#F7DF1E",
@@ -53,8 +52,6 @@ const [viewingFix, setViewingFix] = useState(null);
   };
 
   const handleDelete = async () => {
-    if (!window.confirm("Are you sure you want to delete this analysis?")) return;
-    
     try {
       await axios.delete(`${API}/analysis/${id}`);
       toast.success("Analysis deleted");
@@ -105,8 +102,27 @@ const [viewingFix, setViewingFix] = useState(null);
       const splitSummary = doc.splitTextToSize(summary, 180);
       doc.text(splitSummary, 14, 56);
 
-      const tableStartY = 60 + (splitSummary.length * 5);
+      let currentY = 60 + (splitSummary.length * 5);
+
+      // --- ADD AI RECOMMENDATIONS TO PDF ---
+      if (analysis?.recommendations && analysis.recommendations.length > 0) {
+        doc.setFontSize(12);
+        doc.setTextColor(0, 0, 0);
+        doc.text("Key Recommendations:", 14, currentY);
+        currentY += 6;
+        
+        doc.setFontSize(9);
+        doc.setTextColor(80, 80, 80);
+        analysis.recommendations.forEach(rec => {
+           const splitRec = doc.splitTextToSize(`• ${rec}`, 180);
+           doc.text(splitRec, 14, currentY);
+           currentY += (splitRec.length * 4) + 2;
+        });
+      }
+
+      currentY += 5;
       
+      // --- ADD SECURITY ISSUES TABLE ---
       const tableData = (analysis?.security_issues || []).map(issue => [
         (issue?.severity || "LOW").toUpperCase(),
         issue?.type || "General Issue",
@@ -114,20 +130,57 @@ const [viewingFix, setViewingFix] = useState(null);
         issue?.line_number?.toString() || "-"
       ]);
 
-      autoTable(doc, {
-        startY: tableStartY,
-        head: [["Severity", "Issue", "File", "Line"]],
-        body: tableData,
-        theme: 'grid',
-        headStyles: { fillColor: [23, 23, 23] },
-        styles: { fontSize: 8 },
-        didParseCell: (data) => {
-          if (data.section === 'body' && data.column.index === 0) {
-            if (data.cell.raw === 'CRITICAL') data.cell.styles.textColor = [255, 77, 77];
-            if (data.cell.raw === 'HIGH') data.cell.styles.textColor = [245, 158, 11];
-          }
-        }
-      });
+      if (tableData.length > 0) {
+          autoTable(doc, {
+            startY: currentY,
+            head: [["Severity", "Issue", "File", "Line"]],
+            body: tableData,
+            theme: 'grid',
+            headStyles: { fillColor: [23, 23, 23] },
+            styles: { fontSize: 8 },
+            didParseCell: (data) => {
+              if (data.section === 'body' && data.column.index === 0) {
+                if (data.cell.raw === 'CRITICAL') data.cell.styles.textColor = [255, 77, 77];
+                if (data.cell.raw === 'HIGH') data.cell.styles.textColor = [245, 158, 11];
+              }
+            }
+          });
+      }
+
+      // --- ADD AI REFACTORED CODE (NEW PAGE) ---
+      if (analysis?.ai_refactors && analysis.ai_refactors.length > 0) {
+          doc.addPage();
+          doc.setFontSize(16);
+          doc.setTextColor(99, 102, 241); // Indigo color
+          doc.text("AI Architectural Refactors", 14, 20);
+          
+          let refactorY = 30;
+          analysis.ai_refactors.forEach(refactor => {
+              if (refactorY > 250) { doc.addPage(); refactorY = 20; }
+              
+              doc.setFontSize(11);
+              doc.setTextColor(0, 0, 0);
+              doc.text(`File: ${refactor.file_path}`, 14, refactorY);
+              refactorY += 5;
+              
+              doc.setFontSize(9);
+              doc.setTextColor(100, 100, 100);
+              const expLines = doc.splitTextToSize(`Reason: ${refactor.explanation}`, 180);
+              doc.text(expLines, 14, refactorY);
+              refactorY += (expLines.length * 4) + 5;
+              
+              doc.setFont("courier", "normal");
+              doc.setFontSize(8);
+              doc.setTextColor(50, 50, 50);
+              const codeLines = doc.splitTextToSize(refactor.refined_code, 180);
+              
+              // Only print first 40 lines of code to save space if it's huge
+              const linesToPrint = codeLines.slice(0, 40); 
+              doc.text(linesToPrint, 14, refactorY);
+              refactorY += (linesToPrint.length * 3.5) + 15;
+              doc.setFont("helvetica", "normal");
+          });
+      }
 
       doc.save(`CodeGuard_${analysis?.name || 'Report'}.pdf`);
       toast.success("PDF report generated!");
@@ -191,6 +244,42 @@ const [viewingFix, setViewingFix] = useState(null);
 
   return (
     <div className="min-h-screen bg-[#050505]" data-testid="analysis-detail">
+      
+      {/* CUSTOM DELETE MODAL */}
+      {deleteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-[#0A0A0A] border border-[#27272A] p-6 rounded-lg shadow-2xl max-w-md w-full mx-4 zoom-in-95">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="bg-red-500/10 p-2 rounded-full">
+                <Trash2 className="w-5 h-5 text-red-500" />
+              </div>
+              <h3 className="text-lg font-bold text-white">Delete Analysis?</h3>
+            </div>
+            <p className="text-sm text-[#A1A1AA] mb-6 leading-relaxed">
+              Are you sure you want to permanently delete this code review? This action cannot be undone and all AI suggestions will be lost.
+            </p>
+            <div className="flex justify-end gap-3">
+              <Button 
+                variant="ghost" 
+                onClick={() => setDeleteModalOpen(false)} 
+                className="text-gray-400 hover:text-white hover:bg-[#171717]"
+              >
+                Cancel
+              </Button>
+              <Button 
+                className="bg-red-500 hover:bg-red-600 text-white font-semibold border-none" 
+                onClick={() => {
+                  setDeleteModalOpen(false);
+                  handleDelete();
+                }}
+              >
+                Yes, Delete
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <nav className="fixed top-0 left-0 right-0 z-50 glass border-b border-white/5">
         <div className="max-w-7xl mx-auto px-6 md:px-12">
           <div className="flex items-center justify-between h-16">
@@ -244,7 +333,7 @@ const [viewingFix, setViewingFix] = useState(null);
               <Button 
                 variant="ghost" 
                 className="btn-ghost text-[#FF4D4D] hover:text-[#FF4D4D] hover:bg-[#FF4D4D]/10"
-                onClick={handleDelete}
+                onClick={() => setDeleteModalOpen(true)}
               >
                 <Trash2 className="w-4 h-4" />
               </Button>
@@ -359,7 +448,7 @@ const [viewingFix, setViewingFix] = useState(null);
                   analysis.security_issues.map((issue, i) => (
                     <div key={i} className="card-dark p-4">
                       <div className="flex items-start justify-between">
-                        <div className="flex items-start gap-3">
+                        <div className="flex items-start gap-3 w-full">
                           <div 
                             className="px-2 py-1 rounded-sm text-xs font-medium uppercase"
                             style={{ 
@@ -370,7 +459,7 @@ const [viewingFix, setViewingFix] = useState(null);
                           >
                             {issue.severity}
                           </div>
-                          <div>
+                          <div className="flex-1">
                             <div className="font-medium">{issue.type}</div>
                             <div className="text-sm text-[#A1A1AA] mt-1">
                               <code className="bg-[#171717] px-2 py-0.5 rounded-sm">
@@ -382,54 +471,50 @@ const [viewingFix, setViewingFix] = useState(null);
                             <div className="flex items-start gap-2 mt-3 p-3 bg-[#171717] rounded-sm">
                               <CheckCircle className="w-4 h-4 text-[#00E599] mt-0.5 shrink-0" />
                               <span className="text-sm text-[#A1A1AA]">{issue.recommendation}</span>
-                              {/* --- AI FIX SECTION --- */}
-                              {/* AI Fix Integration */}
-                              {/* Optimized AI Fix Section */}
-                              {analysis.ai_fixes && (
-                                <div className="mt-6 space-y-4">
-                                  {analysis.ai_fixes
-                                    .filter(fix => fix.file_path === issue.file_path && 
-                                                  (fix.issue_type === issue.type || fix.type === issue.type))
-                                    .slice(0, 1) // Only show the most relevant fix per issue card
-                                    .map((fix, fixIdx) => (
-                                      <div key={fixIdx} className="rounded-md border border-[#00E599]/30 bg-[#0A0A0A] overflow-hidden">
-                                        {/* Header Bar */}
-                                        <div className="flex items-center justify-between bg-[#00E599]/10 px-4 py-2 border-b border-[#00E599]/20">
-                                          <div className="flex items-center gap-2">
-                                            <div className="h-2 w-2 rounded-full bg-[#00E599] animate-pulse" />
-                                            <span className="text-[10px] font-bold text-[#00E599] uppercase tracking-wider">
-                                              AI Suggested Patch
-                                            </span>
-                                          </div>
-                                          <Button 
-                                            variant="ghost" 
-                                            size="sm" 
-                                            className="h-7 text-[10px] hover:bg-[#00E599]/20 text-[#00E599] font-semibold"
-                                            onClick={() => {
-                                              navigator.clipboard.writeText(fix.fix_code);
-                                              toast.success("Code copied!");
-                                            }}
-                                          >
-                                            <Download className="w-3 h-3 mr-1" /> Copy Fix
-                                          </Button>
+                            </div>
+                            
+                            {/* --- AI FIX SECTION --- */}
+                            {analysis.ai_fixes && (
+                              <div className="mt-6 space-y-4">
+                                {analysis.ai_fixes
+                                  .filter(fix => fix.file_path === issue.file_path && 
+                                                (fix.issue_type === issue.type || fix.type === issue.type))
+                                  .slice(0, 1) 
+                                  .map((fix, fixIdx) => (
+                                    <div key={fixIdx} className="rounded-md border border-[#00E599]/30 bg-[#0A0A0A] overflow-hidden">
+                                      <div className="flex items-center justify-between bg-[#00E599]/10 px-4 py-2 border-b border-[#00E599]/20">
+                                        <div className="flex items-center gap-2">
+                                          <div className="h-2 w-2 rounded-full bg-[#00E599] animate-pulse" />
+                                          <span className="text-[10px] font-bold text-[#00E599] uppercase tracking-wider">
+                                            AI Suggested Patch
+                                          </span>
                                         </div>
-
-                                        {/* Explanation & Code Block */}
-                                        <div className="p-4">
-                                          <p className="text-xs text-gray-400 mb-3 leading-relaxed">
-                                            <span className="text-[#00E599] font-semibold">Pro Tip:</span> {fix.explanation}
-                                          </p>
-                                          <div className="relative group">
-                                            <pre className="text-[11px] font-mono text-gray-300 bg-[#050505] p-4 rounded border border-white/5 overflow-x-auto leading-6">
-                                              <code>{fix.fix_code}</code>
-                                            </pre>
-                                          </div>
+                                        <Button 
+                                          variant="ghost" 
+                                          size="sm" 
+                                          className="h-7 text-[10px] hover:bg-[#00E599]/20 text-[#00E599] font-semibold"
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(fix.fix_code);
+                                            toast.success("Code copied!");
+                                          }}
+                                        >
+                                          <Download className="w-3 h-3 mr-1" /> Copy Fix
+                                        </Button>
+                                      </div>
+                                      <div className="p-4">
+                                        <p className="text-xs text-gray-400 mb-3 leading-relaxed">
+                                          <span className="text-[#00E599] font-semibold">Pro Tip:</span> {fix.explanation}
+                                        </p>
+                                        <div className="relative group">
+                                          <pre className="text-[11px] font-mono text-gray-300 bg-[#050505] p-4 rounded border border-white/5 overflow-x-auto leading-6">
+                                            <code>{fix.fix_code}</code>
+                                          </pre>
                                         </div>
                                       </div>
-                                    ))}
-                                </div>
-                              )}
-                            </div>
+                                    </div>
+                                  ))}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -487,7 +572,7 @@ const [viewingFix, setViewingFix] = useState(null);
                               ))}
                             </div>
                             {/* --- PHASE 3: AI REFACTOR SECTION --- */}
-                            {analysis.ai_refactors && analysis.ai_refactors.find(r => r.file_path === risk.file_path) && (
+                            {analysis.ai_refactors && analysis.ai_refactors.find(r => risk.file_path.includes(r.file_path) || r.file_path.includes(risk.file_path)) && (
                               <div className="mt-6 border-t border-white/5 pt-4">
                                 <div className="flex items-center justify-between mb-3">
                                   <div className="flex items-center gap-2">
@@ -500,12 +585,16 @@ const [viewingFix, setViewingFix] = useState(null);
                                     </div>
                                   </div>
                                   <Button 
-                                    variant="ghost" 
+                                    variant="outline" 
                                     size="sm" 
-                                    className={`h-7 text-[10px] border border-white/5 ${showRefactor[risk.file_path] ? 'bg-[#6366F1] text-white hover:bg-[#6366F1]/80' : 'bg-[#171717] text-[#A1A1AA] hover:bg-[#27272A]'}`}
+                                    className={`h-7 text-[10px] transition-all ${
+                                      showRefactor[risk.file_path] 
+                                        ? 'bg-[#6366F1] text-white border-[#6366F1] hover:bg-[#4F46E5]' 
+                                        : 'bg-transparent text-[#6366F1] border-[#6366F1]/50 hover:bg-[#6366F1]/10'
+                                    }`}
                                     onClick={() => setShowRefactor(prev => ({ ...prev, [risk.file_path]: !prev[risk.file_path] }))}
                                   >
-                                    {showRefactor[risk.file_path] ? "View Original" : "✨ View Refactored"}
+                                    {showRefactor[risk.file_path] ? "View Original" : "✨ View Refactored Code"}
                                   </Button>
                                 </div>
 
@@ -513,17 +602,17 @@ const [viewingFix, setViewingFix] = useState(null);
                                   <div className="space-y-3 animate-in fade-in zoom-in-95 duration-300">
                                     <div className="bg-[#0A0A0A] border border-[#6366F1]/30 p-4 rounded-sm">
                                       <p className="text-xs text-[#A1A1AA] mb-3 italic leading-relaxed">
-                                        <span className="text-[#6366F1] font-bold">Architect's Note:</span> {analysis.ai_refactors.find(r => r.file_path === risk.file_path).explanation}
+                                        <span className="text-[#6366F1] font-bold">Architect's Note:</span> {analysis.ai_refactors.find(r => risk.file_path.includes(r.file_path) || r.file_path.includes(risk.file_path)).explanation}
                                       </p>
                                       <div className="relative group">
                                         <pre className="text-[11px] font-mono text-gray-300 bg-[#050505] p-4 rounded-sm border border-white/5 overflow-x-auto max-h-80 leading-relaxed whitespace-pre">
-                                          <code>{analysis.ai_refactors.find(r => r.file_path === risk.file_path).refined_code}</code>
+                                          <code>{analysis.ai_refactors.find(r => risk.file_path.includes(r.file_path) || r.file_path.includes(risk.file_path)).refined_code}</code>
                                         </pre>
                                         <Button 
                                           size="sm" 
                                           className="absolute top-2 right-2 h-6 text-[9px] bg-[#6366F1] hover:bg-[#4F46E5] opacity-0 group-hover:opacity-100 transition-opacity"
                                           onClick={() => {
-                                            navigator.clipboard.writeText(analysis.ai_refactors.find(r => r.file_path === risk.file_path).refined_code);
+                                            navigator.clipboard.writeText(analysis.ai_refactors.find(r => risk.file_path.includes(r.file_path) || r.file_path.includes(risk.file_path)).refined_code);
                                             toast.success("Refactored code copied!");
                                           }}
                                         >
@@ -535,7 +624,7 @@ const [viewingFix, setViewingFix] = useState(null);
                                 ) : (
                                   <div className="p-3 bg-[#171717]/30 rounded-sm border border-dashed border-white/10">
                                     <p className="text-[10px] text-[#A1A1AA] text-center italic">
-                                      Logic is too complex. Click "View Refactored" to see the AI-optimized architecture.
+                                      Logic is too complex. Click "View Refactored Code" to see the AI-optimized architecture.
                                     </p>
                                   </div>
                                 )}
@@ -567,7 +656,17 @@ const [viewingFix, setViewingFix] = useState(null);
                               <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
                           </Pie>
-                          <Tooltip contentStyle={{ background: '#0A0A0A', border: '1px solid #27272A', borderRadius: '2px' }} />
+                          <Tooltip 
+                            contentStyle={{ 
+                              backgroundColor: '#171717', 
+                              border: '1px solid #27272A', 
+                              borderRadius: '6px',
+                              color: '#E4E4E7',
+                              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.5)'
+                            }}
+                            itemStyle={{ color: '#00E599', fontWeight: 'bold' }}
+                            formatter={(value, name) => [value, name]}
+                          />
                         </PieChart>
                       </ResponsiveContainer>
                       <div className="flex flex-wrap gap-3 mt-4">
