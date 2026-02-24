@@ -461,6 +461,10 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
     
     analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
     
+    # 1. INITIALIZE ai_result with defaults
+    ai_result = {"summary": "", "recommendations": [], "fixes": [], "refactors": []}
+    
+    # 2. Setup the initial document with empty AI fields
     analysis_doc = {
         "analysis_id": analysis_id,
         "user_id": user.user_id,
@@ -476,8 +480,8 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
         "overall_score": None,
         "ai_summary": None,
         "recommendations": [],
-        "ai_fixes": ai_result.get("fixes", []),
-        "ai_refactors": ai_result.get("refactors", [])
+        "ai_fixes": [],
+        "ai_refactors": []
     }
     
     await db.analyses.insert_one(analysis_doc)
@@ -489,7 +493,6 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
             resp = await client_http.get(api_url, headers={"Accept": "application/vnd.github.v3+json"})
             
             if resp.status_code == 404:
-                # Try master branch
                 api_url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/master?recursive=1"
                 resp = await client_http.get(api_url, headers={"Accept": "application/vnd.github.v3+json"})
             
@@ -507,7 +510,6 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
             language_stats = {}
             total_lines = 0
             
-            # Filter and process code files
             code_extensions = {".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rs", ".cpp", ".c", ".rb", ".php", ".json"}
             code_files = [f for f in tree_data.get("tree", []) if f["type"] == "blob" and Path(f["path"]).suffix in code_extensions][:50]
             
@@ -515,7 +517,6 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
                 file_path = file_info["path"]
                 language = detect_language(file_path)
                 
-                # Fetch file content
                 raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main/{file_path}"
                 file_resp = await client_http.get(raw_url)
                 
@@ -526,64 +527,43 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
                 if file_resp.status_code == 200:
                     content = file_resp.text
                     
-                    # ==========================================
-                    # NEW LEVEL-0 SECRET SCANNER INTEGRATION
-                    # ==========================================
+                    # Secret Scanner
                     secret_findings = secret_detector.scan_content(content, file_path)
                     for secret in secret_findings:
                         all_security_issues.append(SecurityIssue(
-                            severity=secret["severity"],
-                            type=secret["type"],
-                            description=secret["description"],
-                            file_path=secret["file_path"],
-                            line_number=None,
-                            recommendation=secret["recommendation"]
+                            severity=secret["severity"], type=secret["type"],
+                            description=secret["description"], file_path=secret["file_path"],
+                            line_number=None, recommendation=secret["recommendation"]
                         ))
 
-                if file_path.endswith("package.json"):
-                    # We use await because the OSV API call is asynchronous
-                    dep_findings = await dependency_detector.scan_package_json(content, file_path)
-                    for dep in dep_findings:
-                        all_security_issues.append(SecurityIssue(
-                            severity=dep["severity"],
-                            type=dep["type"],
-                            description=dep["description"],
-                            file_path=dep["file_path"],
-                            line_number=None,
-                            recommendation=dep["recommendation"]
-                        ))
-                    # ==========================================
+                    # Dependency Scanner
+                    if file_path.endswith("package.json"):
+                        dep_findings = await dependency_detector.scan_package_json(content, file_path)
+                        for dep in dep_findings:
+                            all_security_issues.append(SecurityIssue(
+                                severity=dep["severity"], type=dep["type"],
+                                description=dep["description"], file_path=dep["file_path"],
+                                line_number=None, recommendation=dep["recommendation"]
+                            ))
 
                     lines = count_lines(content)
                     total_lines += lines
-                    
                     language_stats[language] = language_stats.get(language, 0) + lines
                     
-                    files.append(CodeFile(
-                        path=file_path,
-                        content=content,
-                        language=language,
-                        lines=lines
-                    ))
+                    files.append(CodeFile(path=file_path, content=content, language=language, lines=lines))
+                    all_security_issues.extend(detect_security_issues(content, file_path, language))
                     
-                    # Analyze security
-                    security_issues = detect_security_issues(content, file_path, language)
-                    all_security_issues.extend(security_issues)
-                    
-                    # Calculate bug risk
                     bug_risk = calculate_bug_risk(content, file_path, language)
                     if bug_risk.risk_score > 0:
                         all_bug_risks.append(bug_risk)
             
-            # Get AI analysis
+            # 3. CALL AI (ai_result is now assigned a value)
             ai_result = await analyze_with_ai(files, all_security_issues, all_bug_risks)
             
-            # Calculate overall score
             security_penalty = len([i for i in all_security_issues if i.severity in ["critical", "high"]]) * 10
             risk_penalty = sum(r.risk_score for r in all_bug_risks) / max(len(all_bug_risks), 1) / 2
             overall_score = max(0, 100 - security_penalty - risk_penalty)
             
-            # Calculate metrics
             avg_complexity = sum(r.risk_score for r in all_bug_risks) / max(len(all_bug_risks), 1)
             maintainability = 100 - avg_complexity
             
@@ -595,7 +575,7 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
                 "maintainability_index": round(maintainability, 2)
             }
             
-            # Update analysis
+            # 4. FINAL UPDATE including ai_refactors
             await db.analyses.update_one(
                 {"analysis_id": analysis_id},
                 {"$set": {
@@ -607,20 +587,21 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
                     "overall_score": round(overall_score, 2),
                     "ai_summary": ai_result.get("summary", ""),
                     "recommendations": ai_result.get("recommendations", []),
-                    "ai_fixes": ai_result.get("fixes", [])
+                    "ai_fixes": ai_result.get("fixes", []),
+                    "ai_refactors": ai_result.get("refactors", [])
                 }}
             )
             
             return {"analysis_id": analysis_id, "status": "completed"}
             
     except Exception as e:
-        logging.error(f"Analysis error: {e}")
+        logging.error(f"GitHub analysis error: {e}")
         await db.analyses.update_one(
             {"analysis_id": analysis_id},
             {"$set": {"status": "failed", "ai_summary": str(e)}}
         )
         return {"analysis_id": analysis_id, "status": "failed"}
-
+        
 @analysis_router.post("/upload")
 async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_current_user)):
     """Analyze uploaded ZIP file"""
@@ -629,6 +610,10 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
     
     analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
     
+    # 1. INITIALIZE ai_result with defaults so it's never "Unbound"
+    ai_result = {"summary": "", "recommendations": [], "fixes": [], "refactors": []}
+    
+    # 2. Setup the initial document (removed ai_result dependencies from here)
     analysis_doc = {
         "analysis_id": analysis_id,
         "user_id": user.user_id,
@@ -644,8 +629,8 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
         "overall_score": None,
         "ai_summary": None,
         "recommendations": [],
-        "ai_fixes": ai_result.get("fixes", []),
-        "ai_refactors": ai_result.get("refactors", [])
+        "ai_fixes": [],
+        "ai_refactors": []
     }
     
     await db.analyses.insert_one(analysis_doc)
@@ -678,9 +663,7 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
                     print(f"DEBUG: Failed to read {file_path}: {e}")
                     continue
 
-                # ==========================================
-                # NEW LEVEL-0 SECRET SCANNER INTEGRATION
-                # ==========================================
+                # Secret Scanner
                 secret_findings = secret_detector.scan_content(file_content, file_path)
                 for secret in secret_findings:
                     all_security_issues.append(SecurityIssue(
@@ -692,9 +675,8 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
                         recommendation=secret["recommendation"]
                     ))
 
-                # Dependency Scanner Integration
+                # Dependency Scanner
                 if file_path.endswith("package.json"):
-                    print(f"DEBUG: Found package.json! Path: {file_path}") # This must show in logs
                     dep_findings = await dependency_detector.scan_package_json(file_content, file_path)
                     for dep in dep_findings:
                         all_security_issues.append(SecurityIssue(
@@ -705,19 +687,15 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
                             line_number=None,
                             recommendation=dep["recommendation"]
                         ))    
-                # ==========================================
                 
                 lines = count_lines(file_content)
                 total_lines += lines
-                
                 language = detect_language(file_path)
                 language_stats[language] = language_stats.get(language, 0) + lines
                 
                 files.append(CodeFile(
-                    path=file_path,
-                    content=file_content,
-                    language=language,
-                    lines=lines
+                    path=file_path, content=file_content,
+                    language=language, lines=lines
                 ))
                 
                 security_issues = detect_security_issues(file_content, file_path, language)
@@ -734,6 +712,7 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
             )
             return {"analysis_id": analysis_id, "status": "failed"}
 
+        # 3. CALL AI (ai_result is now assigned a value)
         ai_result = await analyze_with_ai(files, all_security_issues, all_bug_risks)
         
         security_penalty = len([i for i in all_security_issues if i.severity in ["critical", "high"]]) * 10
@@ -751,6 +730,7 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
             "maintainability_index": round(maintainability, 2)
         }
         
+        # 4. FINAL UPDATE with all data including refactors
         await db.analyses.update_one(
             {"analysis_id": analysis_id},
             {"$set": {
@@ -762,7 +742,8 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
                 "overall_score": round(overall_score, 2),
                 "ai_summary": ai_result.get("summary", ""),
                 "recommendations": ai_result.get("recommendations", []),
-                "ai_fixes": ai_result.get("fixes", [])
+                "ai_fixes": ai_result.get("fixes", []),
+                "ai_refactors": ai_result.get("refactors", []) # Successfully included
             }}
         )
         
@@ -775,7 +756,7 @@ async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_
             {"$set": {"status": "failed", "ai_summary": str(e)}}
         )
         return {"analysis_id": analysis_id, "status": "failed"}
-        
+
 @analysis_router.get("/list")
 async def list_analyses(user: User = Depends(get_current_user)):
     """List all analyses for the current user"""

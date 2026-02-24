@@ -21,6 +21,7 @@ export default function AnalysisDetail() {
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedRisks, setExpandedRisks] = useState({});
+  const [showRefactor, setShowRefactor] = useState({});
   // Add this near your other useState hooks (around line 24)
 const [viewingFix, setViewingFix] = useState(null);
   const languageColors = {
@@ -484,6 +485,61 @@ const [viewingFix, setViewingFix] = useState(null);
                                 </div>
                               ))}
                             </div>
+                            {/* --- PHASE 3: AI REFACTOR SECTION --- */}
+                            {analysis.ai_refactors && analysis.ai_refactors.find(r => r.file_path === risk.file_path) && (
+                              <div className="mt-6 border-t border-white/5 pt-4">
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex items-center gap-2">
+                                    <div className="bg-[#6366F1]/20 p-1.5 rounded-sm">
+                                      <Code2 className="w-4 h-4 text-[#6366F1]" />
+                                    </div>
+                                    <div>
+                                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">AI Architectural Refactor</h4>
+                                      <p className="text-[10px] text-[#A1A1AA]">Complexity reduction & modularization</p>
+                                    </div>
+                                  </div>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    className={`h-7 text-[10px] border border-white/5 ${showRefactor[risk.file_path] ? 'bg-[#6366F1] text-white hover:bg-[#6366F1]/80' : 'bg-[#171717] text-[#A1A1AA] hover:bg-[#27272A]'}`}
+                                    onClick={() => setShowRefactor(prev => ({ ...prev, [risk.file_path]: !prev[risk.file_path] }))}
+                                  >
+                                    {showRefactor[risk.file_path] ? "View Original" : "✨ View Refactored"}
+                                  </Button>
+                                </div>
+
+                                {showRefactor[risk.file_path] ? (
+                                  <div className="space-y-3 animate-in fade-in zoom-in-95 duration-300">
+                                    <div className="bg-[#0A0A0A] border border-[#6366F1]/30 p-4 rounded-sm">
+                                      <p className="text-xs text-[#A1A1AA] mb-3 italic leading-relaxed">
+                                        <span className="text-[#6366F1] font-bold">Architect's Note:</span> {analysis.ai_refactors.find(r => r.file_path === risk.file_path).explanation}
+                                      </p>
+                                      <div className="relative group">
+                                        <pre className="text-[11px] font-mono text-gray-300 bg-[#050505] p-3 rounded-sm border border-white/5 overflow-x-auto max-h-80 leading-relaxed">
+                                          <code>{analysis.ai_refactors.find(r => r.file_path === risk.file_path).refined_code}</code>
+                                        </pre>
+                                        <Button 
+                                          size="sm" 
+                                          className="absolute top-2 right-2 h-6 text-[9px] bg-[#6366F1] hover:bg-[#4F46E5] opacity-0 group-hover:opacity-100 transition-opacity"
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(analysis.ai_refactors.find(r => r.file_path === risk.file_path).refined_code);
+                                            toast.success("Refactored code copied!");
+                                          }}
+                                        >
+                                          Copy Clean Code
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="p-3 bg-[#171717]/30 rounded-sm border border-dashed border-white/10">
+                                    <p className="text-[10px] text-[#A1A1AA] text-center italic">
+                                      Logic is too complex. Click "View Refactored" to see the AI-optimized architecture.
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
