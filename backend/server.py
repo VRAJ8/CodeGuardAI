@@ -413,11 +413,14 @@ async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityI
     COMPLEXITY RISKS:
     {[r.model_dump() for r in existing_risks if r.file_path in risk_paths]}
 
-    Provide a JSON response with:
+    Provide a JSON response with exactly these 4 keys:
     1. 'summary': 2-sentence quality report.
     2. 'recommendations': 5 bullet points for improvement.
     3. 'fixes': List for security issues with keys: 'issue_type', 'file_path', 'explanation', 'fix_code'.
-    4. 'refactors': List for complex files with keys: 'file_path', 'explanation', 'refined_code'.
+    4. 'refactors': List for complex files. Each object MUST contain:
+       - 'file_path': The file name.
+       - 'explanation': A short note on why the architecture was changed.
+       - 'refined_code': THE ACTUAL, FULLY REWRITTEN SOURCE CODE. Do NOT write a summary, description, or advice here. You MUST output the literal, complete, refactored programming code that replaces the original.
     """
 
     try:
@@ -601,7 +604,7 @@ async def analyze_github(request: AnalysisRequest, user: User = Depends(get_curr
             {"$set": {"status": "failed", "ai_summary": str(e)}}
         )
         return {"analysis_id": analysis_id, "status": "failed"}
-        
+
 @analysis_router.post("/upload")
 async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_current_user)):
     """Analyze uploaded ZIP file"""
