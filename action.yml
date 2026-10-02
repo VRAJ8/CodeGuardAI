@@ -1,0 +1,49 @@
+name: CodeGuard AI Scan
+description: SAST (Bandit, Semgrep, rule pack), secret detection, OSV dependency audit and code-health scoring with SARIF output.
+author: VRAJ8
+branding:
+  icon: shield
+  color: green
+inputs:
+  path:
+    description: Directory to scan
+    default: "."
+  fail-on:
+    description: Fail the job when a finding at or above this severity exists (critical|high|medium|low|none)
+    default: high
+  sarif-file:
+    description: Where to write the SARIF report
+    default: codeguard.sarif
+  exclude:
+    description: Space-separated globs / directory prefixes to skip (e.g. "tests/fixtures docs")
+    default: ""
+  semgrep:
+    description: Also run the Semgrep rule pack (installs semgrep via pipx)
+    default: "true"
+outputs:
+  sarif-file:
+    description: Path to the SARIF report
+    value: ${{ inputs.sarif-file }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v6
+      with:
+        python-version: "3.12"
+    - shell: bash
+      run: |
+        pip install -q -r "$GITHUB_ACTION_PATH/backend/requirements-cli.txt"
+        if [ "${{ inputs.semgrep }}" = "true" ]; then pipx install -q semgrep==1.179.0 || echo "semgrep unavailable, continuing"; fi
+    - shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}/backend
+        SCAN_PATH: ${{ inputs.path }}
+        SARIF: ${{ inputs.sarif-file }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        EXCLUDE: ${{ inputs.exclude }}
+      run: |
+        args=()
+        for pattern in $EXCLUDE; do args+=(--exclude "$pattern"); done
+        python -m codeguard scan "$SCAN_PATH" "${args[@]}" --format sarif -o "$SARIF" --fail-on none
+        # Human-readable summary in the job log; this step's exit code gates the build.
+        python -m codeguard scan "$SCAN_PATH" "${args[@]}" --fail-on "$FAIL_ON"

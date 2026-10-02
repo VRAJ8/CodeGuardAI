@@ -1,291 +1,224 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Shield, Bug, GitBranch, Zap, ArrowRight, Code2, Lock, BarChart3 } from "lucide-react";
 import axios from "axios";
-import { API } from "@/App";
+import { toast } from "sonner";
+import {
+  ArrowRight, Github, KeyRound, Package, Gauge, Sparkles, GitPullRequest, FileCheck2, Terminal, ShieldCheck, Radar, Boxes, Star,
+} from "lucide-react";
+import { Logo } from "@/components/AppShell";
+import { SeverityBadge } from "@/components/viz";
+import { API, DEV_LOGIN } from "@/lib/api";
+
+const FEATURES = [
+  { icon: ShieldCheck, title: "Multi-engine SAST", body: "Bandit's Python AST checks, Semgrep taint-tracking rules and a cross-language rule pack, deduped into one list.", tag: "Bandit · Semgrep", bg: "bg-yel" },
+  { icon: KeyRound, title: "Secret detection", body: "13 provider signatures (AWS, Stripe, GitHub, OpenAI…) plus Shannon-entropy checks. Values are always redacted.", tag: "CWE-798", bg: "bg-pink" },
+  { icon: Package, title: "Dependency audit + SBOM", body: "npm, PyPI and Go manifests checked against OSV.dev, with CVSS v3 scores and the version that fixes each one.", tag: "OSV · CycloneDX", bg: "bg-lilac" },
+  { icon: Radar, title: "OWASP Top 10 mapping", body: "Every finding gets a CWE and an OWASP 2021 category, so you see exactly where the risk sits.", tag: "A01 – A10", bg: "bg-lime" },
+  { icon: Gauge, title: "Code health", body: "Radon cyclomatic complexity, maintainability index and nesting depth point at the functions most likely to break.", tag: "Radon", bg: "bg-tang" },
+  { icon: Sparkles, title: "AI patches", body: "An LLM triages real findings and writes copy-paste fixes and refactors for the riskiest files.", tag: "Llama 3.3", bg: "bg-mint" },
+];
+
+const ENGINES = ["Bandit", "Semgrep", "OSV.dev", "Radon", "SARIF 2.1", "CycloneDX 1.5", "OWASP Top 10", "CVSS v3.1", "GitHub Actions", "Docker"];
+
+// Illustrative before/after diff for the hero mock-up. The "before" line is deliberately vulnerable.
+const DEMO_PATCH = [
+  // codeguard-ignore-next-line: CG-SQLI-CONCAT -- marketing copy showing what CodeGuard catches
+  `- db.query("SELECT * FROM charges WHERE id='" + id + "'")`,
+  `+ db.query("SELECT * FROM charges WHERE id = $1", [id])`,
+].join("\n");
+
+const CI_YAML = `- uses: VRAJ8/CodeGuardAI@main
+  with:
+    fail-on: high
+- uses: github/codeql-action/upload-sarif@v4
+  with:
+    sarif_file: codeguard.sarif`;
+
+function Marquee() {
+  const row = ENGINES.map((e) => (
+    <span key={e} className="flex items-center gap-8 pr-8 whitespace-nowrap">{e}<span className="text-yel">✦</span></span>
+  ));
+  return (
+    <div className="relative -rotate-1 border-y-[3px] border-ink bg-ink text-snow overflow-hidden">
+      <div className="marquee flex w-max py-4 font-display text-2xl md:text-3xl font-extrabold uppercase">{row}{row}</div>
+    </div>
+  );
+}
 
 export default function Landing() {
   const navigate = useNavigate();
-  const [isChecking, setIsChecking] = useState(true);
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    // FIX: Modified checkAuth to handle guest users silently
-    const checkAuth = async () => {
-      try {
-        const response = await axios.get(`${API}/auth/me`);
-        // If the user has a valid session, move them to the dashboard automatically
-        if (response.data) {
-          navigate("/dashboard");
-        }
-      } catch (error) {
-        // FAIL SILENTLY: Guest users will hit this 401 error. 
-        // We just stop the loading state and show them the landing page normally.
-        setIsChecking(false);
-      }
-    };
-    checkAuth();
+    axios.get(`${API}/auth/me`).then(() => navigate("/dashboard")).catch(() => setChecking(false));
   }, [navigate]);
 
   // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
   const handleLogin = () => {
-    const redirectUrl = window.location.origin + '/dashboard';
+    const redirectUrl = window.location.origin + "/dashboard";
     window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
   };
 
-  if (isChecking) {
-    return (
-      <div className="min-h-screen bg-[#050505] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-[#00E599] border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
+  const devLogin = async () => {
+    try {
+      const { data } = await axios.post(`${API}/auth/dev-login`);
+      navigate("/dashboard", { state: { user: data } });
+    } catch {
+      toast.error("Dev login is disabled on this server");
+    }
+  };
+
+  if (checking) {
+    return <div className="min-h-screen grid place-items-center"><div className="w-12 h-12 rounded-xl border-[3px] border-ink bg-yel shadow-brut animate-spin [animation-duration:1.4s]" /></div>;
   }
 
   return (
-    <div className="min-h-screen bg-[#050505] overflow-hidden">
-      {/* Navigation */}
-      <nav className="fixed top-0 left-0 right-0 z-50 glass border-b border-white/5">
-        <div className="max-w-7xl mx-auto px-6 md:px-12 lg:px-24">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-2">
-              <Shield className="w-6 h-6 text-[#00E599]" />
-              <span className="font-bold text-lg tracking-tight" data-testid="logo">CodeGuard AI</span>
-            </div>
-            <Button 
-              onClick={handleLogin}
-              className="btn-primary px-6 py-2"
-              data-testid="login-btn"
-            >
-              Get Started
-            </Button>
+    <div className="min-h-screen overflow-x-hidden">
+      <nav className="fixed top-0 inset-x-0 z-50 bg-cream/90 backdrop-blur border-b-[2.5px] border-ink">
+        <div className="max-w-6xl mx-auto px-4 md:px-6 h-16 flex items-center justify-between">
+          <Logo />
+          <div className="flex items-center gap-2">
+            <a className="btn-ghost btn-sm hidden sm:inline-flex" href="https://github.com/VRAJ8/CodeGuardAI" target="_blank" rel="noreferrer"><Github className="w-4 h-4" strokeWidth={2.5} /> GitHub</a>
+            {DEV_LOGIN && <button className="btn-secondary btn-sm" onClick={devLogin}>Dev login</button>}
+            <button className="btn-dark btn-sm" onClick={handleLogin} data-testid="login-btn">Get started</button>
           </div>
         </div>
       </nav>
 
-      {/* Hero Section */}
-      <section className="relative pt-32 pb-24 px-6 md:px-12 lg:px-24">
-        <div className="absolute inset-0 hero-glow" />
-        
-        <div className="max-w-7xl mx-auto relative">
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
-            <div className="md:col-span-7 space-y-8">
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#0A0A0A] border border-[#27272A] rounded-sm text-sm animate-fade-in">
-                <Zap className="w-4 h-4 text-[#00E599]" />
-                <span className="text-[#A1A1AA]">Powered by GPT-5.2</span>
-              </div>
-              
-              <h1 className="text-5xl md:text-7xl tracking-tighter leading-none animate-fade-in stagger-1" data-testid="hero-title">
-                Autonomous<br />
-                <span className="text-[#00E599]">Code Reviewer</span>
-              </h1>
-              
-              <p className="text-lg text-[#A1A1AA] max-w-xl animate-fade-in stagger-2">
-                AI-powered code analysis that predicts bugs, detects security vulnerabilities, 
-                and provides actionable recommendations. Stop bugs before they ship.
-              </p>
-              
-              <div className="flex flex-wrap gap-4 animate-fade-in stagger-3">
-                <Button 
-                  onClick={handleLogin}
-                  className="btn-primary px-8 py-3 text-lg flex items-center gap-2"
-                  data-testid="hero-cta"
-                >
-                  Start Free Analysis
-                  <ArrowRight className="w-5 h-5" />
-                </Button>
-                <Button 
-                  variant="outline"
-                  className="btn-secondary px-8 py-3 text-lg"
-                  data-testid="hero-demo"
-                >
-                  View Demo
-                </Button>
-              </div>
-
-              {/* Stats */}
-              <div className="grid grid-cols-3 gap-8 pt-8 border-t border-[#27272A] animate-fade-in stagger-4">
-                <div>
-                  <div className="text-3xl font-bold text-[#00E599]">98%</div>
-                  <div className="text-sm text-[#A1A1AA]">Bug Detection</div>
-                </div>
-                <div>
-                  <div className="text-3xl font-bold text-[#00E599]">50+</div>
-                  <div className="text-sm text-[#A1A1AA]">Security Patterns</div>
-                </div>
-                <div>
-                  <div className="text-3xl font-bold text-[#00E599]">&lt;30s</div>
-                  <div className="text-sm text-[#A1A1AA]">Analysis Time</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Hero Image */}
-            <div className="md:col-span-5 relative animate-fade-in stagger-5">
-              <div className="relative aspect-square rounded-sm overflow-hidden border border-[#27272A]">
-                <img 
-                  src="https://images.unsplash.com/photo-1607184023678-63ea486d62cd?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Nzh8MHwxfHNlYXJjaHwxfHxmdXR1cmlzdGljJTIwZGF0YSUyMGNlbnRlciUyMG5lb24lMjBsaWdodHN8ZW58MHx8fGJsYWNrfDE3NjY3MzM2Mzd8MA&ixlib=rb-4.1.0&q=85"
-                  alt="AI Code Analysis"
-                  className="w-full h-full object-cover opacity-60"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-transparent to-transparent" />
-                
-                {/* Floating Code Preview */}
-                <div className="absolute bottom-4 left-4 right-4 glass border border-white/10 rounded-sm p-4">
-                  <pre className="text-xs font-mono text-[#00E599] overflow-hidden">
-{`// Bug Risk: HIGH
-function processData(input) {
-  eval(input); // ⚠️ Critical
-  return data;
-}`}
-                  </pre>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section className="py-24 px-6 md:px-12 lg:px-24 bg-[#0A0A0A]">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-5xl tracking-tight mb-4">
-              Everything You Need to<br />
-              <span className="text-[#00E599]">Ship Better Code</span>
-            </h2>
-            <p className="text-[#A1A1AA] max-w-2xl mx-auto">
-              Our AI analyzes your codebase using advanced static analysis and machine learning 
-              to find issues before they become problems.
+      {/* Hero */}
+      <section className="relative pt-32 md:pt-36 pb-20 px-4 md:px-6">
+        <div className="relative max-w-6xl mx-auto grid lg:grid-cols-[1.15fr_1fr] gap-14 items-center">
+          <div className="relative min-w-0">
+            <span className="sticker bg-lime -rotate-2 fade-up">✦ v3 · SARIF, SBOM & CI gating</span>
+            <h1 className="mt-6 font-display text-[64px] md:text-[104px] font-extrabold leading-[0.86] tracking-[-0.05em] fade-up d-1">
+              ship code<br />that isn't<br />
+              <span className="relative inline-block">
+                <span className="relative z-10">cooked.</span>
+                <span className="absolute left-0 right-0 bottom-[0.08em] h-[0.32em] bg-pink -z-0 -rotate-1" />
+              </span>
+            </h1>
+            <span className="hidden md:inline-flex absolute top-24 right-4 sticker bg-yel rotate-12 text-sm h-9 px-3 shadow-brut">no config 🙅</span>
+            <p className="mt-7 text-xl text-sub max-w-lg fade-up d-2">
+              A DevSecOps scanner that grades your repo <b className="text-ink">A–F</b>. SAST, secrets, dependency CVEs and code health in one pass,
+              with AI-written fixes for what it finds.
             </p>
+            <div className="mt-9 flex flex-wrap gap-3 fade-up d-3">
+              <button className="btn-primary h-14 px-7 text-lg" onClick={handleLogin}>Scan a repo, free <ArrowRight className="w-5 h-5" strokeWidth={3} /></button>
+              <a className="btn-secondary h-14 px-6 text-lg" href="https://github.com/VRAJ8/CodeGuardAI" target="_blank" rel="noreferrer"><Star className="w-5 h-5" strokeWidth={2.5} /> Star it</a>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-            {/* Feature 1 - Large */}
-            <div className="md:col-span-8 card-dark card-hover p-8" data-testid="feature-security">
-              <div className="flex items-start gap-6">
-                <div className="p-3 bg-[#00E599]/10 rounded-sm">
-                  <Lock className="w-8 h-8 text-[#00E599]" />
-                </div>
+          {/* Product preview */}
+          <div className="relative min-w-0 fade-up d-3">
+            <div className="absolute -top-6 -left-6 w-24 h-24 rounded-full bg-cobalt border-[3px] border-ink hidden md:block" />
+            <div className="absolute -bottom-5 -right-4 w-20 h-20 rotate-12 bg-lime border-[3px] border-ink hidden md:block" />
+            <div className="relative card p-5 rotate-[1.5deg] shadow-[10px_10px_0_0_#111]">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-bold"><Github className="w-4 h-4" strokeWidth={2.5} /> acme/payments-api</div>
+                <span className="chip font-mono">main</span>
+              </div>
+              <div className="mt-5 flex items-center gap-5">
+                <div className="w-24 h-24 rounded-[18px] grid place-items-center font-display text-6xl font-extrabold bg-tang border-[3px] border-ink shadow-brut -rotate-6">D</div>
                 <div>
-                  <h3 className="text-xl mb-2">Security Vulnerability Detection</h3>
-                  <p className="text-[#A1A1AA] mb-4">
-                    Automatically scan for SQL injection, XSS, hardcoded secrets, and 50+ security patterns. 
-                    Get detailed remediation steps for each issue.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <span className="badge-critical px-2 py-1 text-xs rounded-sm">SQL Injection</span>
-                    <span className="badge-critical px-2 py-1 text-xs rounded-sm">XSS</span>
-                    <span className="badge-high px-2 py-1 text-xs rounded-sm">Secrets</span>
-                    <span className="badge-medium px-2 py-1 text-xs rounded-sm">CSRF</span>
+                  <div className="font-display text-3xl font-extrabold">62<span className="text-base text-sub">/100</span></div>
+                  <span className="sticker bg-tang mt-1">⚠️ Risky</span>
+                  <div className="mt-2 text-[13px] font-semibold">+14 pts · 6 fixed since last scan</div>
+                </div>
+              </div>
+              <div className="mt-5 space-y-2">
+                {[
+                  ["critical", "SQL injection via Express request data", "routes/charge.js:42", "Semgrep"],
+                  ["critical", "Hardcoded secret: Stripe secret key", "config/index.js:7", "Secrets"],
+                  ["high", "Vulnerable dependency: lodash@4.17.11", "package.json:14", "OSV"],
+                  ["medium", "Weak hash algorithm (MD5/SHA1)", "utils/token.py:19", "Bandit"],
+                ].map(([sev, t, loc, eng]) => (
+                  <div key={t} className="flex items-center gap-3 p-2.5 rounded-[10px] border-2 border-ink bg-cream/60">
+                    <span className="w-[84px] shrink-0"><SeverityBadge severity={sev} /></span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-bold truncate">{t}</div>
+                      <div className="text-[11px] font-mono text-sub">{loc}</div>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold">{eng}</span>
                   </div>
-                </div>
+                ))}
               </div>
-            </div>
-
-            {/* Feature 2 */}
-            <div className="md:col-span-4 card-dark card-hover p-8" data-testid="feature-bugs">
-              <div className="p-3 bg-[#FF4D4D]/10 rounded-sm w-fit mb-4">
-                <Bug className="w-8 h-8 text-[#FF4D4D]" />
-              </div>
-              <h3 className="text-xl mb-2">Bug Prediction</h3>
-              <p className="text-[#A1A1AA] text-sm">
-                ML-powered analysis predicts which files are most likely to contain bugs based on complexity metrics.
-              </p>
-            </div>
-
-            {/* Feature 3 */}
-            <div className="md:col-span-4 card-dark card-hover p-8" data-testid="feature-github">
-              <div className="p-3 bg-[#6366F1]/10 rounded-sm w-fit mb-4">
-                <GitBranch className="w-8 h-8 text-[#6366F1]" />
-              </div>
-              <h3 className="text-xl mb-2">GitHub Integration</h3>
-              <p className="text-[#A1A1AA] text-sm">
-                Paste any public GitHub URL and get instant analysis. Private repos supported with upload.
-              </p>
-            </div>
-
-            {/* Feature 4 - Large */}
-            <div className="md:col-span-8 card-dark card-hover p-8" data-testid="feature-metrics">
-              <div className="flex items-start gap-6">
-                <div className="p-3 bg-[#F59E0B]/10 rounded-sm">
-                  <BarChart3 className="w-8 h-8 text-[#F59E0B]" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-xl mb-2">Code Quality Metrics</h3>
-                  <p className="text-[#A1A1AA] mb-4">
-                    Track complexity, maintainability, and code health scores across your entire codebase.
-                  </p>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="text-center p-4 bg-[#171717] rounded-sm">
-                      <div className="text-2xl font-bold text-[#00E599]">A+</div>
-                      <div className="text-xs text-[#A1A1AA]">Code Grade</div>
-                    </div>
-                    <div className="text-center p-4 bg-[#171717] rounded-sm">
-                      <div className="text-2xl font-bold text-[#F59E0B]">85</div>
-                      <div className="text-xs text-[#A1A1AA]">Maintainability</div>
-                    </div>
-                    <div className="text-center p-4 bg-[#171717] rounded-sm">
-                      <div className="text-2xl font-bold text-[#6366F1]">12</div>
-                      <div className="text-xs text-[#A1A1AA]">Avg Complexity</div>
-                    </div>
-                  </div>
-                </div>
+              <div className="mt-4 rounded-[10px] border-2 border-ink overflow-hidden">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-extrabold bg-lilac border-b-2 border-ink"><Sparkles className="w-3.5 h-3.5" strokeWidth={3} /> Suggested patch</div>
+                <pre className="code-block !rounded-none !border-0 !text-[11px] !leading-5 !p-3">{DEMO_PATCH}</pre>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Languages Section */}
-      <section className="py-24 px-6 md:px-12 lg:px-24">
-        <div className="max-w-7xl mx-auto text-center">
-          <h2 className="text-2xl tracking-tight mb-8 text-[#A1A1AA]">
-            Supports Your Favorite Languages
+      <Marquee />
+
+      {/* Features */}
+      <section className="px-4 md:px-6 py-24">
+        <div className="max-w-6xl mx-auto">
+          <span className="sticker bg-snow">What's inside</span>
+          <h2 className="mt-4 font-display text-5xl md:text-7xl font-extrabold leading-[0.9] max-w-3xl">
+            one scan.<br /><span className="highlight">six engines.</span>
           </h2>
-          <div className="flex flex-wrap justify-center gap-8">
-            {["Python", "JavaScript", "TypeScript", "Java", "Go", "Rust", "C++", "Ruby"].map((lang) => (
-              <div 
-                key={lang}
-                className="flex items-center gap-2 px-6 py-3 bg-[#0A0A0A] border border-[#27272A] rounded-sm"
-              >
-                <Code2 className="w-5 h-5 text-[#00E599]" />
-                <span>{lang}</span>
+          <div className="mt-14 grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {FEATURES.map(({ icon: Icon, title, body, tag, bg }, i) => (
+              <div key={title} className={`card card-hover p-6 ${bg} ${i % 3 === 1 ? "lg:translate-y-6" : ""}`}>
+                <div className="flex items-center justify-between">
+                  <div className="w-12 h-12 rounded-[12px] grid place-items-center bg-snow border-[2.5px] border-ink shadow-brut-sm -rotate-6"><Icon className="w-6 h-6" strokeWidth={2.5} /></div>
+                  <span className="chip font-mono">{tag}</span>
+                </div>
+                <h3 className="mt-6 font-display text-2xl font-extrabold">{title}</h3>
+                <p className="mt-2 text-[15px] leading-relaxed">{body}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="py-24 px-6 md:px-12 lg:px-24 bg-[#0A0A0A]">
-        <div className="max-w-3xl mx-auto text-center">
-          <h2 className="text-3xl md:text-5xl tracking-tight mb-6">
-            Ready to Find Bugs<br />
-            <span className="text-[#00E599]">Before They Find You?</span>
-          </h2>
-          <p className="text-[#A1A1AA] mb-8">
-            Start analyzing your code in seconds. No credit card required.
-          </p>
-          <Button 
-            onClick={handleLogin}
-            className="btn-primary px-12 py-4 text-lg"
-            data-testid="cta-btn"
-          >
-            Start Free Analysis
-          </Button>
+      {/* CI */}
+      <section className="px-4 md:px-6 py-24 border-t-[3px] border-ink bg-snow">
+        <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-14 items-center">
+          <div className="min-w-0">
+            <span className="sticker bg-cobalt text-white">Shift left</span>
+            <h2 className="mt-4 font-display text-5xl md:text-6xl font-extrabold leading-[0.9]">block vulns before they merge.</h2>
+            <p className="mt-5 text-lg text-sub">
+              The engine behind the dashboard also runs as a CLI and a GitHub Action. It fails the build when a high-severity
+              finding shows up, and the SARIF output appears in GitHub's Security tab next to CodeQL.
+            </p>
+            <div className="mt-8 grid sm:grid-cols-3 gap-3">
+              {[[GitPullRequest, "PR gating", "bg-yel"], [FileCheck2, "SARIF upload", "bg-pink"], [Boxes, "Docker ready", "bg-lime"]].map(([Icon, t, bg]) => (
+                <div key={t} className={`card-flat shadow-brut-sm p-4 flex items-center gap-3 font-bold ${bg}`}><Icon className="w-5 h-5" strokeWidth={2.5} /> {t}</div>
+              ))}
+            </div>
+          </div>
+          <div className="card overflow-hidden min-w-0 -rotate-1 shadow-[10px_10px_0_0_#3B5BFF]">
+            <div className="flex items-center gap-2 px-4 py-3 border-b-[2.5px] border-ink bg-yel font-mono text-xs font-bold">
+              <span className="flex gap-1.5 mr-2">{["bg-cherry", "bg-tang", "bg-mint"].map((c) => <span key={c} className={`w-3 h-3 rounded-full border-2 border-ink ${c}`} />)}</span>
+              <Terminal className="w-3.5 h-3.5" strokeWidth={2.5} /> .github/workflows/security.yml
+            </div>
+            <pre className="code-block !rounded-none !border-0 !text-[14px] !leading-7 !p-6">{CI_YAML}</pre>
+            <div className="px-5 py-3 border-t-[2.5px] border-ink bg-ink text-snow font-mono text-sm">
+              <span className="text-yel">$</span> python -m codeguard scan . --fail-on high<span className="blink">▌</span>
+            </div>
+          </div>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="py-12 px-6 md:px-12 lg:px-24 border-t border-[#27272A]">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <Shield className="w-5 h-5 text-[#00E599]" />
-            <span className="font-bold">CodeGuard AI</span>
-          </div>
-          <div className="text-sm text-[#A1A1AA]">
-            © 2026 CodeGuard AI. Built with GPT-5.2
-          </div>
+      {/* CTA */}
+      <section className="px-4 md:px-6 py-24">
+        <div className="max-w-5xl mx-auto card bg-yel p-10 md:p-16 text-center relative overflow-hidden">
+          <span className="absolute top-6 left-6 sticker bg-pink -rotate-12 hidden md:inline-flex">free 💸</span>
+          <span className="absolute bottom-8 right-8 sticker bg-snow rotate-6 hidden md:inline-flex">~20s scans ⚡</span>
+          <h2 className="font-display text-5xl md:text-7xl font-extrabold leading-[0.9]">what's your<br />repo's grade?</h2>
+          <p className="mt-5 text-lg font-medium">No credit card. No config. Just paste a GitHub URL.</p>
+          <button className="btn-dark h-14 px-8 mt-9 text-lg" onClick={handleLogin}>Find out <ArrowRight className="w-5 h-5" strokeWidth={3} /></button>
+        </div>
+      </section>
+
+      <footer className="border-t-[2.5px] border-ink bg-snow px-4 md:px-6 py-8">
+        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-4 text-sm font-semibold">
+          <Logo />
+          <span className="font-mono text-xs">FastAPI · React · MongoDB · Bandit · Semgrep · OSV.dev</span>
         </div>
       </footer>
     </div>

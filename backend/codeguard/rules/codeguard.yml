@@ -1,0 +1,109 @@
+# CodeGuard AI custom Semgrep rule pack.
+# Run standalone with:  semgrep scan --config backend/codeguard/rules <path>
+rules:
+  - id: express-sqli-taint
+    mode: taint
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: User input from the request flows into a raw SQL query. Use parameterized queries.
+    metadata:
+      title: SQL injection via Express request data
+      cwe: "CWE-89: SQL Injection"
+      codeguard-severity: critical
+      fix: Use placeholders (db.query('... WHERE id = $1', [id])) or an ORM query builder.
+    pattern-sources:
+      - pattern-either:
+          - pattern: $REQ.query
+          - pattern: $REQ.body
+          - pattern: $REQ.params
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $DB.query($SQL, ...)
+              - pattern: $DB.raw($SQL, ...)
+              - pattern: $DB.execute($SQL, ...)
+          - focus-metavariable: $SQL
+
+  - id: express-open-redirect
+    mode: taint
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: Redirect target comes from user input, enabling open redirects / phishing.
+    metadata:
+      title: Open redirect
+      cwe: "CWE-601: Open Redirect"
+      fix: Redirect only to relative paths or an allow-list of hosts.
+    pattern-sources:
+      - pattern-either:
+          - pattern: $REQ.query
+          - pattern: $REQ.body
+    pattern-sinks:
+      - pattern: $RES.redirect(...)
+
+  - id: flask-ssti
+    languages: [python]
+    severity: ERROR
+    message: render_template_string() with request data allows server-side template injection (RCE).
+    metadata:
+      title: Server-side template injection
+      cwe: "CWE-94: Code Injection"
+      codeguard-severity: critical
+      fix: Render a static template file and pass user data as context variables.
+    pattern-either:
+      - pattern: flask.render_template_string(<... flask.request.$ATTR ...>, ...)
+      - pattern: render_template_string(<... request.$ATTR ...>, ...)
+
+  - id: python-requests-ssrf
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: A URL taken from the incoming request is fetched server-side (SSRF).
+    metadata:
+      title: Server-side request forgery
+      cwe: "CWE-918: Server-Side Request Forgery (SSRF)"
+      fix: Validate the host against an allow-list and block private IP ranges.
+    pattern-sources:
+      - pattern-either:
+          - pattern: request.args.get(...)
+          - pattern: request.form.get(...)
+          - pattern: request.json[...]
+    pattern-sinks:
+      - pattern-either:
+          - pattern: requests.$METHOD($URL, ...)
+          - pattern: httpx.$METHOD($URL, ...)
+          - pattern: urllib.request.urlopen($URL, ...)
+
+  - id: jwt-hardcoded-secret
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: JWT is signed with a hardcoded string secret. Anyone with the source can forge tokens.
+    metadata:
+      title: Hardcoded JWT signing secret
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      fix: Load the signing key from an environment variable or KMS.
+    pattern-either:
+      - pattern: jwt.sign($P, "...", ...)
+      - pattern: jwt.verify($T, "...", ...)
+
+  - id: insecure-cookie
+    languages: [python]
+    severity: WARNING
+    message: Cookie is set without the secure / httponly flags.
+    metadata:
+      title: Insecure cookie flags
+      cwe: "CWE-1004: Sensitive Cookie Without 'HttpOnly' Flag"
+      fix: Pass secure=True, httponly=True and an explicit samesite policy.
+    patterns:
+      - pattern: $RESP.set_cookie(...)
+      - pattern-not: $RESP.set_cookie(..., httponly=True, ...)
+      - pattern-not: $RESP.delete_cookie(...)
+
+  - id: react-href-javascript
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: A dynamic href may allow `javascript:` URLs (XSS).
+    metadata:
+      title: Dynamic href in JSX
+      cwe: "CWE-79: Cross-site Scripting"
+      fix: Validate that URLs start with http(s):// before rendering them as links.
+    pattern: <a href={$X.$Y} />

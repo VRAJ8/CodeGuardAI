@@ -1,872 +1,583 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Response, Request, Depends
-from fastapi.responses import JSONResponse
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
+"""CodeGuard AI — FastAPI service.
+
+Scans run as background jobs: POST returns immediately with an analysis_id and the
+client polls GET /api/analysis/{id} for `status` + `progress`.
+"""
+from __future__ import annotations
+
 import logging
-from pathlib import Path
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+import os
 import uuid
-from datetime import datetime, timezone, timedelta
-import aiofiles
-import tempfile
-import zipfile
-import io
-import httpx # Using standard HTTP client for stability
-import ast
-import re
-import json
-from secret_scanner import SecretScanner
-from dependency_scanner import DependencyScanner
+from collections import Counter
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import List, Optional
+
+import httpx
+from dotenv import load_dotenv
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi.responses import JSONResponse
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel
+from starlette.middleware.cors import CORSMiddleware
+
+from codeguard import __version__
+from codeguard.ai import ai_enabled, triage
+from codeguard.engine import disambiguate_fingerprints, scan
+from codeguard.exporters import to_cyclonedx, to_sarif
+from codeguard.models import SEVERITIES, Dependency, Finding
+from codeguard.scanners.external import bandit_available, semgrep_available
+from codeguard.scoring import grade_for
+from codeguard.sources import SourceError, load_github, load_zip, parse_github_url
+from codeguard.taxonomy import OWASP_TOP10
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+load_dotenv(ROOT_DIR / ".env")
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("codeguard")
 
-# Create the main app
-app = FastAPI(title="CodeGuard AI - Code Reviewer & Bug Predictor")
-secret_detector = SecretScanner()
-dependency_detector = DependencyScanner()
+client = AsyncIOMotorClient(os.environ.get("MONGO_URL", "mongodb://localhost:27017"))
+db = client[os.environ.get("DB_NAME", "codeguard")]
 
-# Create routers
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+MAX_CONCURRENT_SCANS = 3
+FINGERPRINT_VERSION = 2  # bump whenever Finding.with_fingerprint changes; see _baseline comparisons
+# Scans run in-process, so one still "processing" after this long was killed by a restart or crash (or is a
+# v2 leftover) and would otherwise hold a concurrency slot forever. Real scans finish in a few minutes.
+STALE_SCAN_AFTER = timedelta(minutes=30)
+STALE_SCAN_ERROR = "Scan interrupted (the server restarted or the scan stalled). Re-scan to try again."
+
+
+async def expire_stale_scans(user_id: Optional[str] = None) -> int:
+    cutoff = (datetime.now(timezone.utc) - STALE_SCAN_AFTER).isoformat()
+    query = {"status": "processing", "created_at": {"$lt": cutoff}}
+    if user_id:
+        query["user_id"] = user_id
+    result = await db.analyses.update_many(query, {"$set": {
+        "status": "failed", "error": STALE_SCAN_ERROR, "progress": {"stage": "Failed", "pct": 100}}})
+    return result.modified_count
+ALLOW_DEV_LOGIN = os.environ.get("ALLOW_DEV_LOGIN", "").lower() == "true"
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        await db.analyses.create_index("analysis_id", unique=True)
+        await db.analyses.create_index([("user_id", 1), ("created_at", -1)])
+        await db.user_sessions.create_index("session_token")
+    except Exception as e:  # pragma: no cover - index creation is best-effort
+        log.warning("index creation skipped: %s", e)
+    try:
+        if expired := await expire_stale_scans():
+            log.info("marked %d stale processing scans as failed", expired)
+    except Exception as e:  # pragma: no cover
+        log.warning("stale-scan cleanup skipped: %s", e)
+    yield
+    client.close()
+
+
+app = FastAPI(title="CodeGuard AI", version=__version__, lifespan=lifespan)
 api_router = APIRouter(prefix="/api")
 auth_router = APIRouter(prefix="/api/auth")
 analysis_router = APIRouter(prefix="/api/analysis")
 
-# ==================== MODELS ====================
 
 class User(BaseModel):
     user_id: str
     email: str
     name: str
     picture: Optional[str] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-class UserSession(BaseModel):
-    session_id: str
-    user_id: str
-    session_token: str
-    expires_at: datetime
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class AnalysisRequest(BaseModel):
     github_url: Optional[str] = None
     name: Optional[str] = None
 
-class CodeFile(BaseModel):
-    path: str
-    content: str
-    language: str
-    lines: int
 
-class SecurityIssue(BaseModel):
-    severity: str  # critical, high, medium, low
-    type: str
-    description: str
-    file_path: str
-    line_number: Optional[int] = None
-    recommendation: str
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
-class BugRisk(BaseModel):
-    file_path: str
-    risk_score: float  # 0-100
-    complexity: str  # low, medium, high
-    issues: List[str]
-
-class CodeMetrics(BaseModel):
-    total_files: int
-    total_lines: int
-    languages: Dict[str, int]
-    avg_complexity: float
-    maintainability_index: float
-
-class AnalysisResult(BaseModel):
-    analysis_id: str
-    user_id: str
-    name: str
-    source_type: str  # github or zip
-    source_url: Optional[str] = None
-    status: str  # pending, processing, completed, failed
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    completed_at: Optional[datetime] = None
-    metrics: Optional[CodeMetrics] = None
-    security_issues: List[SecurityIssue] = []
-    bug_risks: List[BugRisk] = []
-    overall_score: Optional[float] = None  # 0-100
-    ai_summary: Optional[str] = None
-    recommendations: List[str] = []
-    ai_fixes: List[Dict[str, Any]] = []
-    ai_refactors: List[Dict[str, Any]] = []
-
-# ==================== AUTH HELPERS ====================
+# ==================== AUTH ====================
 
 async def get_current_user(request: Request) -> User:
-    """Get current user from session token in cookies or Authorization header"""
-    session_token = request.cookies.get("session_token")
-    
-    if not session_token:
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            session_token = auth_header[7:]
-    
-    if not session_token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    session_doc = await db.user_sessions.find_one(
-        {"session_token": session_token},
-        {"_id": 0}
-    )
-    
-    if not session_doc:
-        raise HTTPException(status_code=401, detail="Invalid session")
-    
-    expires_at = session_doc["expires_at"]
-    if isinstance(expires_at, str):
-        expires_at = datetime.fromisoformat(expires_at)
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=401, detail="Session expired")
-    
-    user_doc = await db.users.find_one(
-        {"user_id": session_doc["user_id"]},
-        {"_id": 0}
-    )
-    
-    if not user_doc:
-        raise HTTPException(status_code=401, detail="User not found")
-    
-    return User(**user_doc)
+    token = request.cookies.get("session_token")
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        token = auth[7:] if auth.startswith("Bearer ") else None
+    if not token:
+        raise HTTPException(401, "Not authenticated")
+    session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+    if not session:
+        raise HTTPException(401, "Invalid session")
+    expires = session["expires_at"]
+    expires = datetime.fromisoformat(expires) if isinstance(expires, str) else expires
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if expires < datetime.now(timezone.utc):
+        raise HTTPException(401, "Session expired")
+    user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
+    if not user:
+        raise HTTPException(401, "User not found")
+    return User(**user)
 
-# ==================== AUTH ENDPOINTS ====================
+
+async def _start_session(response: Response, email: str, name: str, picture: Optional[str], token: str) -> dict:
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing:
+        user_id = existing["user_id"]
+        await db.users.update_one({"user_id": user_id}, {"$set": {"name": name, "picture": picture}})
+    else:
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        await db.users.insert_one({"user_id": user_id, "email": email, "name": name, "picture": picture,
+                                   "created_at": now_iso()})
+    await db.user_sessions.insert_one({
+        "user_id": user_id, "session_token": token, "created_at": now_iso(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+    })
+    response.set_cookie("session_token", token, httponly=True, secure=True, samesite="none", path="/",
+                        max_age=7 * 24 * 3600)
+    return await db.users.find_one({"user_id": user_id}, {"_id": 0})
+
 
 @auth_router.post("/session")
 async def create_session(request: Request, response: Response):
-    """Exchange session_id for session_token"""
-    body = await request.json()
-    session_id = body.get("session_id")
-    
+    """Exchange an Emergent OAuth session_id for a session token."""
+    session_id = (await request.json()).get("session_id")
     if not session_id:
-        raise HTTPException(status_code=400, detail="session_id required")
-    
-    # Fetch user data from Emergent Auth
-    async with httpx.AsyncClient() as client_http:
-        resp = await client_http.get(
-            "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-            headers={"X-Session-ID": session_id}
-        )
-        
-        if resp.status_code != 200:
-            raise HTTPException(status_code=401, detail="Invalid session_id")
-        
-        user_data = resp.json()
-    
-    email = user_data.get("email")
-    name = user_data.get("name")
-    picture = user_data.get("picture")
-    session_token = user_data.get("session_token")
-    
-    # Check if user exists
-    existing_user = await db.users.find_one({"email": email}, {"_id": 0})
-    
-    if existing_user:
-        user_id = existing_user["user_id"]
-        # Update user info
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": {"name": name, "picture": picture}}
-        )
-    else:
-        # Create new user
-        user_id = f"user_{uuid.uuid4().hex[:12]}"
-        user_doc = {
-            "user_id": user_id,
-            "email": email,
-            "name": name,
-            "picture": picture,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.users.insert_one(user_doc)
-    
-    # Create session
-    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-    session_doc = {
-        "user_id": user_id,
-        "session_token": session_token,
-        "expires_at": expires_at.isoformat(),
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    await db.user_sessions.insert_one(session_doc)
-    
-    # Set cookie
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        path="/",
-        max_age=7 * 24 * 60 * 60
-    )
-    
-    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    return user_doc
+        raise HTTPException(400, "session_id required")
+    async with httpx.AsyncClient(timeout=15) as http:
+        resp = await http.get("https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
+                              headers={"X-Session-ID": session_id})
+    if resp.status_code != 200:
+        raise HTTPException(401, "Invalid session_id")
+    data = resp.json()
+    return await _start_session(response, data.get("email"), data.get("name"), data.get("picture"),
+                                data.get("session_token"))
+
+
+@auth_router.post("/dev-login")
+async def dev_login(response: Response):
+    """Local-only login for docker-compose / development. Disabled unless ALLOW_DEV_LOGIN=true."""
+    if not ALLOW_DEV_LOGIN:
+        raise HTTPException(404, "Not found")
+    return await _start_session(response, "dev@codeguard.local", "Dev User", None, uuid.uuid4().hex)
+
 
 @auth_router.get("/me")
 async def get_me(user: User = Depends(get_current_user)):
-    """Get current authenticated user"""
-    return {
-        "user_id": user.user_id,
-        "email": user.email,
-        "name": user.name,
-        "picture": user.picture
-    }
+    return user.model_dump()
+
 
 @auth_router.post("/logout")
 async def logout(request: Request, response: Response):
-    """Logout user"""
-    session_token = request.cookies.get("session_token")
-    if session_token:
-        await db.user_sessions.delete_one({"session_token": session_token})
-    
-    response.delete_cookie(key="session_token", path="/")
+    token = request.cookies.get("session_token")
+    if token:
+        await db.user_sessions.delete_one({"session_token": token})
+    response.delete_cookie("session_token", path="/")
     return {"message": "Logged out"}
 
-# ==================== CODE ANALYSIS HELPERS ====================
+# ==================== SCAN PIPELINE ====================
 
-def detect_language(filename: str) -> str:
-    """Detect programming language from file extension"""
-    ext_map = {
-        ".py": "python",
-        ".js": "javascript",
-        ".jsx": "javascript",
-        ".ts": "typescript",
-        ".tsx": "typescript",
-        ".java": "java",
-        ".go": "go",
-        ".rs": "rust",
-        ".cpp": "cpp",
-        ".c": "c",
-        ".rb": "ruby",
-        ".php": "php",
-        ".cs": "csharp",
-        ".swift": "swift",
-        ".kt": "kotlin",
-        ".json": "json"
+def _new_doc(analysis_id: str, user: User, name: str, source_type: str, source_url: Optional[str]) -> dict:
+    return {
+        "analysis_id": analysis_id, "user_id": user.user_id, "name": name, "source_type": source_type,
+        "source_url": source_url, "status": "processing", "progress": {"stage": "Queued", "pct": 5},
+        "created_at": now_iso(), "completed_at": None, "metrics": None, "security_issues": [], "bug_risks": [],
+        "dependencies": [], "overall_score": None, "grade": None, "ai_summary": None, "recommendations": [],
+        "ai_fixes": [], "ai_refactors": [], "engine_version": __version__,
     }
-    ext = Path(filename).suffix.lower()
-    return ext_map.get(ext, "unknown")
 
-def count_lines(content: str) -> int:
-    """Count lines of code"""
-    return len(content.split("\n"))
 
-def analyze_python_complexity(content: str) -> dict:
-    """Analyze Python code complexity"""
-    try:
-        tree = ast.parse(content)
-        functions = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
-        classes = [node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
-        
-        # Count nested structures
-        max_depth = 0
-        for node in ast.walk(tree):
-            depth = 0
-            parent = node
-            while hasattr(parent, '_parent'):
-                parent = parent._parent
-                depth += 1
-            max_depth = max(max_depth, depth)
-        
-        return {
-            "functions": len(functions),
-            "classes": len(classes),
-            "max_nesting": max_depth,
-            "complexity": "high" if len(functions) > 20 or max_depth > 5 else "medium" if len(functions) > 10 else "low"
-        }
-    except:
-        return {"functions": 0, "classes": 0, "max_nesting": 0, "complexity": "unknown"}
+async def _guard_concurrency(user: User):
+    await expire_stale_scans(user.user_id)
+    running = await db.analyses.count_documents({"user_id": user.user_id, "status": "processing"})
+    if running >= MAX_CONCURRENT_SCANS:
+        raise HTTPException(429, f"You already have {running} scans running. Wait for one to finish, "
+                                 "or delete a stuck one from your scan history.")
 
-def detect_security_issues(content: str, file_path: str, language: str) -> List[SecurityIssue]:
-    """Detect security issues in code"""
-    issues = []
-    lines = content.split("\n")
-    
-    # Common patterns to detect
-    patterns = [
-        (r"eval\s*\(", "Dangerous eval() usage", "critical", "Avoid using eval() as it can execute arbitrary code"),
-        (r"exec\s*\(", "Dangerous exec() usage", "critical", "Avoid using exec() as it can execute arbitrary code"),
-        (r"password\s*=\s*['\"][^'\"]+['\"]", "Hardcoded password", "critical", "Use environment variables for sensitive data"),
-        (r"api[_-]?key\s*=\s*['\"][^'\"]+['\"]", "Hardcoded API key", "critical", "Use environment variables for API keys"),
-        (r"secret\s*=\s*['\"][^'\"]+['\"]", "Hardcoded secret", "high", "Use environment variables for secrets"),
-        (r"TODO|FIXME|HACK|XXX", "Code annotation found", "low", "Address TODO/FIXME comments"),
-        (r"console\.log\(", "Console logging in production", "low", "Remove debug logging in production"),
-        (r"debugger", "Debugger statement", "medium", "Remove debugger statements"),
-        (r"pickle\.load", "Unsafe pickle usage", "high", "Pickle can execute arbitrary code, use JSON instead"),
-        (r"subprocess\.call\(.*shell\s*=\s*True", "Shell injection risk", "critical", "Avoid shell=True in subprocess"),
-        (r"os\.system\(", "OS command execution", "high", "Use subprocess with proper input validation"),
-        (r"sql\s*=.*\+.*\+", "Potential SQL injection", "critical", "Use parameterized queries"),
-        (r"innerHTML\s*=", "XSS vulnerability", "high", "Use textContent or sanitize HTML"),
-    ]
-    
-    for i, line in enumerate(lines, 1):
-        for pattern, issue_type, severity, recommendation in patterns:
-            if re.search(pattern, line, re.IGNORECASE):
-                issues.append(SecurityIssue(
-                    severity=severity,
-                    type=issue_type,
-                    description=f"Found: {line.strip()[:100]}",
-                    file_path=file_path,
-                    line_number=i,
-                    recommendation=recommendation
-                ))
-    
-    return issues
 
-def calculate_bug_risk(content: str, file_path: str, language: str) -> BugRisk:
-    """Calculate bug risk for a file"""
-    issues = []
-    risk_score = 0
-    
-    lines = content.split("\n")
-    line_count = len(lines)
-    
-    # File size risk
-    if line_count > 500:
-        risk_score += 20
-        issues.append("File is too large (>500 lines)")
-    elif line_count > 200:
-        risk_score += 10
-        issues.append("File is moderately large (>200 lines)")
-    
-    # Check for complexity indicators
-    if language == "python":
-        complexity = analyze_python_complexity(content)
-        if complexity["complexity"] == "high":
-            risk_score += 30
-            issues.append("High cyclomatic complexity")
-        elif complexity["complexity"] == "medium":
-            risk_score += 15
-        
-        if complexity["functions"] > 15:
-            risk_score += 10
-            issues.append("Too many functions in one file")
-    
-    # Check for code smells
-    long_lines = sum(1 for line in lines if len(line) > 120)
-    if long_lines > 10:
-        risk_score += 10
-        issues.append(f"{long_lines} lines exceed 120 characters")
-    
-    # Check for TODO/FIXME
-    todos = sum(1 for line in lines if "TODO" in line or "FIXME" in line)
-    if todos > 5:
-        risk_score += 15
-        issues.append(f"{todos} TODO/FIXME comments found")
-    
-    # Check for empty catch blocks (generic pattern)
-    empty_catches = len(re.findall(r"except\s*:\s*pass|catch\s*\([^)]*\)\s*\{\s*\}", content))
-    if empty_catches > 0:
-        risk_score += 20
-        issues.append(f"{empty_catches} empty exception handlers")
-    
-    complexity_level = "high" if risk_score > 50 else "medium" if risk_score > 25 else "low"
-    
-    return BugRisk(
-        file_path=file_path,
-        risk_score=min(risk_score, 100),
-        complexity=complexity_level,
-        issues=issues
-    )
+async def _baseline(user_id: str, name: str, source_url: Optional[str], analysis_id: str) -> Optional[dict]:
+    query = {"user_id": user_id, "status": "completed", "analysis_id": {"$ne": analysis_id}}
+    query.update({"source_url": source_url} if source_url else {"name": name})
+    cur = db.analyses.find(query, {"_id": 0, "analysis_id": 1, "overall_score": 1, "security_issues.fingerprint": 1,
+                                   "suppressed_issues.fingerprint": 1, "fingerprint_version": 1, "engine_version": 1,
+                                   "created_at": 1}).sort("created_at", -1).limit(1)
+    docs = await cur.to_list(1)
+    return docs[0] if docs else None
 
-# FIX: DIRECT API CALL TO GROQ (Bypassing libraries to avoid version conflicts)
-async def analyze_with_ai(files: List[CodeFile], existing_issues: List[SecurityIssue], existing_risks: List[BugRisk]) -> dict:
-    """Analyze code and generate both security patches and architectural refactors"""
-    
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
-    if not api_key:
-        return {"summary": "AI key not configured", "recommendations": [], "fixes": [], "refactors": []}
 
-    # 1. Prioritize files for context (Security Issues + Top 2 Complex Files)
-    risk_paths = [r.file_path for r in sorted(existing_risks, key=lambda x: x.risk_score, reverse=True)[:2]]
-    issue_paths = [i.file_path for i in existing_issues]
-    relevant_paths = list(set(issue_paths + risk_paths))
-    
-    # 2. Extract code context (limit to 3 files to stay within token limits)
-    code_context = "\n".join([f"File: {f.path}\nContent:\n{f.content}" for f in files if f.path in relevant_paths][:3])
-    
-    prompt = f"""
-    You are a Staff Software Architect. Analyze the code and the detected issues.
-    
-    CODE CONTEXT:
-    {code_context}
-    
-    SECURITY ISSUES:
-    {[i.model_dump() for i in existing_issues]}
-    
-    COMPLEXITY RISKS:
-    {[r.model_dump() for r in existing_risks if r.file_path in risk_paths]}
-
-    Provide a JSON response with exactly these 4 keys:
-    1. 'summary': 2-sentence quality report.
-    2. 'recommendations': 5 bullet points for improvement.
-    3. 'fixes': List for security issues with keys: 'issue_type', 'file_path', 'explanation', 'fix_code'.
-    4. 'refactors': List for complex files. Each object MUST contain:
-       - 'file_path': The file name.
-       - 'explanation': A short note on why the architecture was changed.
-       - 'refined_code': THE ACTUAL, FULLY REWRITTEN SOURCE CODE. Do NOT write a summary, description, or advice here. You MUST output the literal, complete, refactored programming code that replaces the original.
-    """
+async def run_pipeline(analysis_id: str, user_id: str, name: str, source_url: Optional[str],
+                       zip_bytes: Optional[bytes] = None):
+    async def progress(stage: str, pct: int):
+        await db.analyses.update_one({"analysis_id": analysis_id}, {"$set": {"progress": {"stage": stage, "pct": pct}}})
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": "llama-3.3-70b-versatile",
-                    "messages": [
-                        {"role": "system", "content": "You are a specialized security and architecture bot. Output valid JSON only."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0.2
-                },
-                timeout=50.0 
-            )
-            
-            if response.status_code == 200:
-                return json.loads(response.json()['choices'][0]['message']['content'])
-            return {"summary": "AI generation failed.", "recommendations": [], "fixes": [], "refactors": []}
+        repo_meta = None
+        await progress("Fetching source", 10)
+        if source_url:
+            files, repo_meta = await load_github(source_url)
+        else:
+            files = load_zip(zip_bytes or b"")
+        if not files:
+            raise SourceError("No supported source files were found.")
+
+        report = await scan(files, progress=progress)
+
+        ai = {"summary": "", "recommendations": [], "fixes": [], "refactors": []}
+        if ai_enabled():
+            await progress("AI triage & patch generation", 85)
+            ai = await triage(files, report.security_issues, report.bug_risks)
+
+        prev = await _baseline(user_id, name, source_url, analysis_id)
+        baseline = None
+        issues = [f.model_dump() for f in report.security_issues]
+        if prev:
+            # Fingerprints are only comparable within one scheme; older scans (v2 engine, or v3 before
+            # fingerprint scheme 2) get a score delta but no new/fixed claims.
+            comparable = prev.get("fingerprint_version") == FINGERPRINT_VERSION
+            fps = lambda key: {i.get("fingerprint") for i in prev.get(key) or [] if i.get("fingerprint")}  # noqa: E731
+            old, old_suppressed = fps("security_issues"), fps("suppressed_issues")
+            new_fps = {i["fingerprint"] for i in issues}
+            # A finding silenced by a codeguard-ignore marker is not "fixed", and one that was merely
+            # un-suppressed is not "new": only real code changes move these numbers.
+            suppressed_fps = {f.fingerprint for f in report.suppressed_issues}
+            for i in issues:
+                i["is_new"] = comparable and i["fingerprint"] not in old | old_suppressed
+            baseline = {
+                "analysis_id": prev["analysis_id"], "created_at": prev.get("created_at"),
+                # v2 used a different scoring formula, so a delta against it would be noise, not progress
+                "score_delta": (round(report.overall_score - (prev.get("overall_score") or 0), 1)
+                                if prev.get("engine_version") else None),
+                "new": sum(1 for i in issues if i.get("is_new")),
+                "fixed": len(old - new_fps - suppressed_fps) if comparable else 0,
+                "suppressed": len(old & suppressed_fps) if comparable else 0,
+                "comparable": comparable,
+            }
+
+        await db.analyses.update_one({"analysis_id": analysis_id}, {"$set": {
+            "status": "completed",
+            "completed_at": now_iso(),
+            "progress": {"stage": "Done", "pct": 100},
+            "metrics": report.metrics.model_dump(),
+            "security_issues": issues,
+            "bug_risks": [r.model_dump() for r in report.bug_risks],
+            "dependencies": [d.model_dump() for d in report.dependencies],
+            "overall_score": report.overall_score,
+            "grade": report.grade,
+            "severity_counts": report.severity_counts,
+            "owasp_counts": report.owasp_counts,
+            "scanner_counts": report.scanner_counts,
+            "scanners_run": report.scanners_run,
+            "suppressed": report.suppressed,
+            "suppressed_issues": [f.model_dump() for f in report.suppressed_issues],
+            "fingerprint_version": FINGERPRINT_VERSION,
+            "scan_errors": report.errors,
+            "scan_warnings": report.warnings,
+            "duration_ms": report.duration_ms,
+            "repo_meta": repo_meta,
+            "baseline": baseline,
+            "ai_summary": ai.get("summary", ""),
+            "recommendations": ai.get("recommendations", []),
+            "ai_fixes": ai.get("fixes", []),
+            "ai_refactors": ai.get("refactors", []),
+        }})
+    except SourceError as e:
+        await _fail(analysis_id, str(e))
     except Exception as e:
-        logging.error(f"AI Phase 3 Error: {e}")
-        return {"summary": "AI analysis error.", "recommendations": [], "fixes": [], "refactors": []}
+        log.exception("scan %s failed", analysis_id)
+        await _fail(analysis_id, f"Scan failed: {type(e).__name__}")
+
+
+async def _fail(analysis_id: str, message: str):
+    await db.analyses.update_one({"analysis_id": analysis_id}, {"$set": {
+        "status": "failed", "error": message, "ai_summary": message, "progress": {"stage": "Failed", "pct": 100}}})
+
 # ==================== ANALYSIS ENDPOINTS ====================
 
-@analysis_router.post("/github")
-async def analyze_github(request: AnalysisRequest, user: User = Depends(get_current_user)):
-    """Start analysis of a GitHub repository"""
-    if not request.github_url:
-        raise HTTPException(status_code=400, detail="github_url is required")
-    
-    # Parse GitHub URL
-    url_match = re.match(r"https?://github\.com/([^/]+)/([^/]+)(?:/.*)?", request.github_url)
-    if not url_match:
-        raise HTTPException(status_code=400, detail="Invalid GitHub URL format")
-    
-    owner, repo = url_match.groups()
-    repo = repo.replace(".git", "")
-    
-    analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
-    
-    # 1. INITIALIZE ai_result with defaults
-    ai_result = {"summary": "", "recommendations": [], "fixes": [], "refactors": []}
-    
-    # 2. Setup the initial document with empty AI fields
-    analysis_doc = {
-        "analysis_id": analysis_id,
-        "user_id": user.user_id,
-        "name": request.name or f"{owner}/{repo}",
-        "source_type": "github",
-        "source_url": request.github_url,
-        "status": "processing",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "completed_at": None,
-        "metrics": None,
-        "security_issues": [],
-        "bug_risks": [],
-        "overall_score": None,
-        "ai_summary": None,
-        "recommendations": [],
-        "ai_fixes": [],
-        "ai_refactors": []
-    }
-    
-    await db.analyses.insert_one(analysis_doc)
-    
+@analysis_router.post("/github", status_code=202)
+async def analyze_github(req: AnalysisRequest, background: BackgroundTasks, user: User = Depends(get_current_user)):
+    if not req.github_url:
+        raise HTTPException(400, "github_url is required")
     try:
-        async with httpx.AsyncClient() as client_http:
-            # Get repository contents
-            api_url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/main?recursive=1"
-            resp = await client_http.get(api_url, headers={"Accept": "application/vnd.github.v3+json"})
-            
-            if resp.status_code == 404:
-                api_url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/master?recursive=1"
-                resp = await client_http.get(api_url, headers={"Accept": "application/vnd.github.v3+json"})
-            
-            if resp.status_code != 200:
-                await db.analyses.update_one(
-                    {"analysis_id": analysis_id},
-                    {"$set": {"status": "failed", "ai_summary": "Could not access repository. Make sure it's public."}}
-                )
-                return {"analysis_id": analysis_id, "status": "failed"}
-            
-            tree_data = resp.json()
-            files = []
-            all_security_issues = []
-            all_bug_risks = []
-            language_stats = {}
-            total_lines = 0
-            
-            code_extensions = {".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rs", ".cpp", ".c", ".rb", ".php", ".json"}
-            code_files = [f for f in tree_data.get("tree", []) if f["type"] == "blob" and Path(f["path"]).suffix in code_extensions][:50]
-            
-            for file_info in code_files:
-                file_path = file_info["path"]
-                language = detect_language(file_path)
-                
-                raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/main/{file_path}"
-                file_resp = await client_http.get(raw_url)
-                
-                if file_resp.status_code == 404:
-                    raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/master/{file_path}"
-                    file_resp = await client_http.get(raw_url)
-                
-                if file_resp.status_code == 200:
-                    content = file_resp.text
-                    
-                    # Secret Scanner
-                    secret_findings = secret_detector.scan_content(content, file_path)
-                    for secret in secret_findings:
-                        all_security_issues.append(SecurityIssue(
-                            severity=secret["severity"], type=secret["type"],
-                            description=secret["description"], file_path=secret["file_path"],
-                            line_number=None, recommendation=secret["recommendation"]
-                        ))
-
-                    # Dependency Scanner
-                    if file_path.endswith("package.json"):
-                        dep_findings = await dependency_detector.scan_package_json(content, file_path)
-                        for dep in dep_findings:
-                            all_security_issues.append(SecurityIssue(
-                                severity=dep["severity"], type=dep["type"],
-                                description=dep["description"], file_path=dep["file_path"],
-                                line_number=None, recommendation=dep["recommendation"]
-                            ))
-
-                    lines = count_lines(content)
-                    total_lines += lines
-                    language_stats[language] = language_stats.get(language, 0) + lines
-                    
-                    files.append(CodeFile(path=file_path, content=content, language=language, lines=lines))
-                    all_security_issues.extend(detect_security_issues(content, file_path, language))
-                    
-                    bug_risk = calculate_bug_risk(content, file_path, language)
-                    if bug_risk.risk_score > 0:
-                        all_bug_risks.append(bug_risk)
-            
-            # 3. CALL AI (ai_result is now assigned a value)
-            ai_result = await analyze_with_ai(files, all_security_issues, all_bug_risks)
-            
-            security_penalty = len([i for i in all_security_issues if i.severity in ["critical", "high"]]) * 10
-            risk_penalty = sum(r.risk_score for r in all_bug_risks) / max(len(all_bug_risks), 1) / 2
-            overall_score = max(0, 100 - security_penalty - risk_penalty)
-            
-            avg_complexity = sum(r.risk_score for r in all_bug_risks) / max(len(all_bug_risks), 1)
-            maintainability = 100 - avg_complexity
-            
-            metrics = {
-                "total_files": len(files),
-                "total_lines": total_lines,
-                "languages": language_stats,
-                "avg_complexity": round(avg_complexity, 2),
-                "maintainability_index": round(maintainability, 2)
-            }
-            
-            # 4. FINAL UPDATE including ai_refactors
-            await db.analyses.update_one(
-                {"analysis_id": analysis_id},
-                {"$set": {
-                    "status": "completed",
-                    "completed_at": datetime.now(timezone.utc).isoformat(),
-                    "metrics": metrics,
-                    "security_issues": [i.model_dump() for i in all_security_issues],
-                    "bug_risks": [r.model_dump() for r in all_bug_risks],
-                    "overall_score": round(overall_score, 2),
-                    "ai_summary": ai_result.get("summary", ""),
-                    "recommendations": ai_result.get("recommendations", []),
-                    "ai_fixes": ai_result.get("fixes", []),
-                    "ai_refactors": ai_result.get("refactors", [])
-                }}
-            )
-            
-            return {"analysis_id": analysis_id, "status": "completed"}
-            
-    except Exception as e:
-        logging.error(f"GitHub analysis error: {e}")
-        await db.analyses.update_one(
-            {"analysis_id": analysis_id},
-            {"$set": {"status": "failed", "ai_summary": str(e)}}
-        )
-        return {"analysis_id": analysis_id, "status": "failed"}
-
-@analysis_router.post("/upload")
-async def analyze_upload(file: UploadFile = File(...), user: User = Depends(get_current_user)):
-    """Analyze uploaded ZIP file"""
-    if not file.filename.endswith(".zip"):
-        raise HTTPException(status_code=400, detail="Only ZIP files are supported")
-    
+        owner, repo, _ = parse_github_url(req.github_url)
+    except SourceError as e:
+        raise HTTPException(400, str(e)) from None
+    await _guard_concurrency(user)
     analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
-    
-    # 1. INITIALIZE ai_result with defaults so it's never "Unbound"
-    ai_result = {"summary": "", "recommendations": [], "fixes": [], "refactors": []}
-    
-    # 2. Setup the initial document (removed ai_result dependencies from here)
-    analysis_doc = {
-        "analysis_id": analysis_id,
-        "user_id": user.user_id,
-        "name": file.filename.replace(".zip", ""),
-        "source_type": "zip",
-        "source_url": None,
-        "status": "processing",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "completed_at": None,
-        "metrics": None,
-        "security_issues": [],
-        "bug_risks": [],
-        "overall_score": None,
-        "ai_summary": None,
-        "recommendations": [],
-        "ai_fixes": [],
-        "ai_refactors": []
-    }
-    
-    await db.analyses.insert_one(analysis_doc)
-    
-    try:
-        content = await file.read()
-        zip_buffer = io.BytesIO(content)
-        
-        files = []
-        all_security_issues = []
-        all_bug_risks = []
-        language_stats = {}
-        total_lines = 0
-        
-        code_extensions = {".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".go", ".rs", ".cpp", ".c", ".rb", ".php", ".json"}
-        
-        with zipfile.ZipFile(zip_buffer, 'r') as zip_file:
-            for zip_info in zip_file.infolist()[:100]:
-                if zip_info.is_dir() or zip_info.filename.startswith('__MACOSX/'):
-                    continue
-                
-                file_path = zip_info.filename
-                if Path(file_path).suffix.lower() not in code_extensions:
-                    continue
-                
-                try:
-                    with zip_file.open(zip_info) as f:
-                        file_content = f.read().decode('utf-8', errors='ignore')
-                except Exception as e:
-                    print(f"DEBUG: Failed to read {file_path}: {e}")
-                    continue
+    name = req.name or f"{owner}/{repo}"
+    url = req.github_url.strip()
+    await db.analyses.insert_one(_new_doc(analysis_id, user, name, "github", url))
+    background.add_task(run_pipeline, analysis_id, user.user_id, name, url)
+    return {"analysis_id": analysis_id, "status": "processing"}
 
-                # Secret Scanner
-                secret_findings = secret_detector.scan_content(file_content, file_path)
-                for secret in secret_findings:
-                    all_security_issues.append(SecurityIssue(
-                        severity=secret["severity"],
-                        type=secret["type"],
-                        description=secret["description"],
-                        file_path=secret["file_path"],
-                        line_number=None,
-                        recommendation=secret["recommendation"]
-                    ))
 
-                # Dependency Scanner
-                if file_path.endswith("package.json"):
-                    dep_findings = await dependency_detector.scan_package_json(file_content, file_path)
-                    for dep in dep_findings:
-                        all_security_issues.append(SecurityIssue(
-                            severity=dep["severity"],
-                            type=dep["type"],
-                            description=dep["description"],
-                            file_path=dep["file_path"],
-                            line_number=None,
-                            recommendation=dep["recommendation"]
-                        ))    
-                
-                lines = count_lines(file_content)
-                total_lines += lines
-                language = detect_language(file_path)
-                language_stats[language] = language_stats.get(language, 0) + lines
-                
-                files.append(CodeFile(
-                    path=file_path, content=file_content,
-                    language=language, lines=lines
-                ))
-                
-                security_issues = detect_security_issues(file_content, file_path, language)
-                all_security_issues.extend(security_issues)
-                
-                bug_risk = calculate_bug_risk(file_content, file_path, language)
-                if bug_risk.risk_score > 0:
-                    all_bug_risks.append(bug_risk)
-        
-        if not files:
-            await db.analyses.update_one(
-                {"analysis_id": analysis_id},
-                {"$set": {"status": "failed", "ai_summary": "No valid code files found in ZIP archive."}}
-            )
-            return {"analysis_id": analysis_id, "status": "failed"}
+@analysis_router.post("/upload", status_code=202)
+async def analyze_upload(background: BackgroundTasks, file: UploadFile = File(...),
+                         user: User = Depends(get_current_user)):
+    if not (file.filename or "").lower().endswith(".zip"):
+        raise HTTPException(400, "Only ZIP files are supported")
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "ZIP must be 25 MB or smaller")
+    await _guard_concurrency(user)
+    analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
+    name = Path(file.filename).stem
+    await db.analyses.insert_one(_new_doc(analysis_id, user, name, "zip", None))
+    background.add_task(run_pipeline, analysis_id, user.user_id, name, None, data)
+    return {"analysis_id": analysis_id, "status": "processing"}
 
-        # 3. CALL AI (ai_result is now assigned a value)
-        ai_result = await analyze_with_ai(files, all_security_issues, all_bug_risks)
-        
-        security_penalty = len([i for i in all_security_issues if i.severity in ["critical", "high"]]) * 10
-        risk_penalty = sum(r.risk_score for r in all_bug_risks) / max(len(all_bug_risks), 1) / 2
-        overall_score = max(0, 100 - security_penalty - risk_penalty)
-        
-        avg_complexity = sum(r.risk_score for r in all_bug_risks) / max(len(all_bug_risks), 1)
-        maintainability = 100 - avg_complexity
-        
-        metrics = {
-            "total_files": len(files),
-            "total_lines": total_lines,
-            "languages": language_stats,
-            "avg_complexity": round(avg_complexity, 2),
-            "maintainability_index": round(maintainability, 2)
-        }
-        
-        # 4. FINAL UPDATE with all data including refactors
-        await db.analyses.update_one(
-            {"analysis_id": analysis_id},
-            {"$set": {
-                "status": "completed",
-                "completed_at": datetime.now(timezone.utc).isoformat(),
-                "metrics": metrics,
-                "security_issues": [i.model_dump() for i in all_security_issues],
-                "bug_risks": [r.model_dump() for r in all_bug_risks],
-                "overall_score": round(overall_score, 2),
-                "ai_summary": ai_result.get("summary", ""),
-                "recommendations": ai_result.get("recommendations", []),
-                "ai_fixes": ai_result.get("fixes", []),
-                "ai_refactors": ai_result.get("refactors", []) # Successfully included
-            }}
-        )
-        
-        return {"analysis_id": analysis_id, "status": "completed"}
-        
-    except Exception as e:
-        logging.error(f"Upload analysis error: {e}")
-        await db.analyses.update_one(
-            {"analysis_id": analysis_id},
-            {"$set": {"status": "failed", "ai_summary": str(e)}}
-        )
-        return {"analysis_id": analysis_id, "status": "failed"}
+
+LIST_PROJECTION = {"_id": 0, "ai_refactors": 0, "ai_fixes": 0, "dependencies": 0, "bug_risks": 0, "suppressed_issues": 0}
+
+
+def _counts(doc: dict) -> dict:
+    if doc.get("severity_counts"):
+        return doc["severity_counts"]
+    c = Counter(i.get("severity") for i in doc.get("security_issues", []))
+    return {s: c.get(s, 0) for s in SEVERITIES}
+
+
+def _light(doc: dict) -> dict:
+    doc = dict(doc)
+    issues = doc.pop("security_issues", []) or []
+    doc["severity_counts"] = _counts({**doc, "security_issues": issues})
+    doc["issue_count"] = len(issues)
+    if doc.get("overall_score") is not None and not doc.get("grade"):
+        doc["grade"] = grade_for(doc["overall_score"])
+    return doc
+
 
 @analysis_router.get("/list")
 async def list_analyses(user: User = Depends(get_current_user)):
-    """List all analyses for the current user"""
-    analyses = await db.analyses.find(
+    await expire_stale_scans(user.user_id)
+    docs = await db.analyses.find({"user_id": user.user_id}, LIST_PROJECTION).sort("created_at", -1).to_list(200)
+    return [_light(d) for d in docs]
+
+
+@analysis_router.get("/stats/dashboard")
+async def dashboard_stats(user: User = Depends(get_current_user)):
+    await expire_stale_scans(user.user_id)
+    docs = await db.analyses.find(
         {"user_id": user.user_id},
-        {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
-    
-    return analyses
+        {"_id": 0, "ai_refactors": 0, "ai_fixes": 0, "bug_risks": 0, "security_issues.description": 0,
+         "security_issues.recommendation": 0, "security_issues.snippet": 0, "suppressed_issues": 0},
+    ).sort("created_at", -1).to_list(500)
+    return build_dashboard(docs)
+
+
+def _scanner_of(issue: dict) -> str:
+    """v2 findings carry no scanner; infer it from the v2 scanners' fixed `type` strings (mirrors frontend api.js)."""
+    if issue.get("scanner"):
+        return issue["scanner"]
+    kind = issue.get("type") or ""
+    if "secret" in kind.lower():
+        return "secrets"
+    return "osv" if kind.lower().startswith("vulnerable dependency") else "patterns"
+
+
+def _vulnerable_dependency_count(doc: dict) -> int:
+    if doc.get("dependencies"):
+        return sum(1 for dep in doc["dependencies"] if dep.get("vulnerabilities"))
+    return sum(1 for i in doc.get("security_issues", []) if _scanner_of(i) == "osv")  # v2: no inventory, count findings
+
+
+def build_dashboard(docs: List[dict]) -> dict:
+    completed = [d for d in docs if d.get("status") == "completed" and d.get("overall_score") is not None]
+    latest = {}
+    for d in completed:  # docs are newest-first, so the first seen per project is its latest scan
+        latest.setdefault(d.get("source_url") or d.get("name"), d)
+    projects = list(latest.values())
+
+    severity = Counter()
+    owasp = Counter()
+    scanners = Counter()
+    for d in projects:
+        for i in d.get("security_issues", []):
+            severity[i.get("severity")] += 1
+            if i.get("owasp"):
+                owasp[i["owasp"]] += 1
+            scanners[_scanner_of(i)] += 1
+
+    languages = Counter()
+    for d in projects:
+        languages.update((d.get("metrics") or {}).get("languages", {}))
+
+    now = datetime.now(timezone.utc)
+
+    def ts(d):
+        try:
+            t = datetime.fromisoformat(d["created_at"])
+            return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+        except (KeyError, ValueError, TypeError):
+            return now
+
+    def avg(xs):
+        return round(sum(xs) / len(xs), 1) if xs else None
+
+    last7 = [d["overall_score"] for d in completed if now - ts(d) <= timedelta(days=7)]
+    prev7 = [d["overall_score"] for d in completed if timedelta(days=7) < now - ts(d) <= timedelta(days=14)]
+    per_day = Counter(ts(d).date().isoformat() for d in docs)
+    activity = [{"date": (now - timedelta(days=i)).date().isoformat(),
+                 "count": per_day.get((now - timedelta(days=i)).date().isoformat(), 0)} for i in range(27, -1, -1)]
+    streak = 0
+    for day in reversed(activity):
+        if day["count"] == 0:
+            if streak == 0 and day is activity[-1]:
+                continue  # today without a scan doesn't break the streak yet
+            break
+        streak += 1
+
+    posture = avg([d["overall_score"] for d in projects]) or 0
+    deps_vulnerable = sum(_vulnerable_dependency_count(d) for d in projects)
+    deps_total = sum(len(d.get("dependencies", [])) for d in projects)
+
+    return {
+        "total_analyses": len(completed),
+        "projects": len(projects),
+        "running": sum(1 for d in docs if d.get("status") == "processing"),
+        "avg_score": avg([d["overall_score"] for d in completed]) or 0,
+        "posture_score": posture,
+        "posture_grade": grade_for(posture) if projects else None,
+        "score_delta_7d": round(avg(last7) - avg(prev7), 1) if last7 and prev7 else None,
+        "total_issues": sum(severity.values()),
+        "severity": {s: severity.get(s, 0) for s in SEVERITIES},
+        "secrets": sum(1 for d in projects for i in d.get("security_issues", []) if _scanner_of(i) == "secrets"),
+        "vulnerable_dependencies": deps_vulnerable,
+        "total_dependencies": deps_total,
+        "lines_scanned": sum((d.get("metrics") or {}).get("total_lines", 0) for d in completed),
+        "fixed_total": sum((d.get("baseline") or {}).get("fixed", 0) for d in completed),
+        "owasp": [{"code": c, "name": n, "count": owasp.get(c, 0)} for c, n in OWASP_TOP10.items()],
+        "scanners": dict(scanners.most_common()),
+        "languages": dict(languages.most_common(8)),
+        "trend": [{"date": d["created_at"], "score": d["overall_score"], "name": d["name"],
+                   "grade": d.get("grade") or grade_for(d["overall_score"])} for d in reversed(completed[:30])],
+        "activity": activity,
+        "streak": streak,
+        "riskiest": [
+            {"analysis_id": d["analysis_id"], "name": d["name"], "score": d["overall_score"],
+             "grade": d.get("grade") or grade_for(d["overall_score"]), "severity": _counts(d)}
+            for d in sorted(projects, key=lambda d: d["overall_score"])[:5]
+        ],
+        "recent_analyses": [_light(d) for d in docs[:6]],
+    }
+
+
+async def _get_owned(analysis_id: str, user: User) -> dict:
+    doc = await db.analyses.find_one({"analysis_id": analysis_id, "user_id": user.user_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Analysis not found")
+    return doc
+
 
 @analysis_router.get("/{analysis_id}")
 async def get_analysis(analysis_id: str, user: User = Depends(get_current_user)):
-    """Get a specific analysis"""
-    analysis = await db.analyses.find_one(
-        {"analysis_id": analysis_id, "user_id": user.user_id},
-        {"_id": 0}
-    )
-    
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
-    
-    return analysis
+    await expire_stale_scans(user.user_id)  # so a page polling a dead scan sees it fail
+    doc = await _get_owned(analysis_id, user)
+    if doc.get("overall_score") is not None and not doc.get("grade"):
+        doc["grade"] = grade_for(doc["overall_score"])
+    return doc
+
+
+def _download(payload: dict, filename: str, media_type: str) -> JSONResponse:
+    return JSONResponse(payload, media_type=media_type,
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+def _slug(name: str) -> str:
+    return "".join(c if c.isalnum() or c in "-_" else "-" for c in name)[:60]
+
+
+@analysis_router.get("/{analysis_id}/sarif")
+async def export_sarif(analysis_id: str, user: User = Depends(get_current_user)):
+    doc = await _get_owned(analysis_id, user)
+    def load(items):
+        out = []
+        for i in items or []:
+            if i.get("rule_id"):
+                out.append(Finding(**i))
+                continue
+            # v2 finding: give each finding type its own rule so names and severities don't bleed together
+            rule = "LEGACY-" + ("".join(c if c.isalnum() else "-" for c in (i.get("type") or "finding")).strip("-")[:60] or "finding")
+            out.append(Finding(**{"scanner": _scanner_of(i), **i, "rule_id": rule}).with_fingerprint(
+                source_line=i.get("description")))
+        disambiguate_fingerprints(out)
+        return out
+    sarif = to_sarif(load(doc.get("security_issues")), load(doc.get("suppressed_issues")))
+    return _download(sarif, f"codeguard-{_slug(doc['name'])}.sarif", "application/sarif+json")
+
+
+@analysis_router.get("/{analysis_id}/sbom")
+async def export_sbom(analysis_id: str, user: User = Depends(get_current_user)):
+    doc = await _get_owned(analysis_id, user)
+    if not doc.get("engine_version"):
+        raise HTTPException(409, "This scan predates the dependency inventory. Re-scan the project to export an SBOM.")
+    deps = [Dependency(**d) for d in doc.get("dependencies", [])]
+    return _download(to_cyclonedx(deps, doc["name"]), f"codeguard-{_slug(doc['name'])}.cdx.json",
+                     "application/vnd.cyclonedx+json")
+
 
 @analysis_router.delete("/{analysis_id}")
 async def delete_analysis(analysis_id: str, user: User = Depends(get_current_user)):
-    """Delete an analysis"""
-    result = await db.analyses.delete_one(
-        {"analysis_id": analysis_id, "user_id": user.user_id}
-    )
-    
+    result = await db.analyses.delete_one({"analysis_id": analysis_id, "user_id": user.user_id})
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Analysis not found")
-    
+        raise HTTPException(404, "Analysis not found")
     return {"message": "Analysis deleted"}
 
-@analysis_router.get("/stats/dashboard")
-async def get_dashboard_stats(user: User = Depends(get_current_user)):
-    """Get dashboard statistics"""
-    analyses = await db.analyses.find(
-        {"user_id": user.user_id, "status": "completed"},
-        {"_id": 0}
-    ).to_list(100)
-    
-    if not analyses:
-        return {
-            "total_analyses": 0,
-            "avg_score": 0,
-            "total_issues": 0,
-            "languages": {},
-            "recent_analyses": []
-        }
-    
-    total_score = sum(a.get("overall_score", 0) for a in analyses)
-    total_issues = sum(len(a.get("security_issues", [])) for a in analyses)
-    
-    language_stats = {}
-    for a in analyses:
-        metrics = a.get("metrics", {})
-        for lang, lines in metrics.get("languages", {}).items():
-            language_stats[lang] = language_stats.get(lang, 0) + lines
-    
-    return {
-        "total_analyses": len(analyses),
-        "avg_score": round(total_score / len(analyses), 2),
-        "total_issues": total_issues,
-        "languages": language_stats,
-        "recent_analyses": analyses[:5]
-    }
+# ==================== PUBLIC ====================
 
-# ==================== ROOT ENDPOINTS ====================
+BADGE_COLORS = {"A": "#16a34a", "B": "#65a30d", "C": "#ca8a04", "D": "#ea580c", "F": "#dc2626"}
+
+
+@api_router.get("/badge/{analysis_id}.svg")
+async def badge(analysis_id: str):
+    """Shields-style README badge. Exposes only the grade and score of that scan."""
+    doc = await db.analyses.find_one({"analysis_id": analysis_id, "status": "completed"},
+                                     {"_id": 0, "overall_score": 1, "grade": 1})
+    grade = (doc or {}).get("grade") or (grade_for(doc["overall_score"]) if doc else "?")
+    value = f"{grade} · {doc['overall_score']:.0f}" if doc else "unknown"
+    color = BADGE_COLORS.get(grade, "#6b7280")
+    lw, vw = 78, 8 + 7 * len(value)
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{lw + vw}" height="20" role="img" aria-label="codeguard: {value}">
+<linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
+<clipPath id="r"><rect width="{lw + vw}" height="20" rx="3" fill="#fff"/></clipPath>
+<g clip-path="url(#r)"><rect width="{lw}" height="20" fill="#18181b"/><rect x="{lw}" width="{vw}" height="20" fill="{color}"/>
+<rect width="{lw + vw}" height="20" fill="url(#s)"/></g>
+<g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
+<text x="{lw / 2}" y="14">codeguard</text><text x="{lw + vw / 2}" y="14">{value}</text></g></svg>"""
+    return Response(svg, media_type="image/svg+xml", headers={"Cache-Control": "max-age=300"})
+
 
 @api_router.get("/")
 async def root():
-    return {"message": "CodeGuard AI - Autonomous Code Reviewer API"}
+    return {"message": "CodeGuard AI API", "version": __version__}
+
 
 @api_router.get("/health")
 async def health():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy", "version": __version__,
+        "engines": {"patterns": True, "secrets": True, "radon": True, "osv": True,
+                    "bandit": bandit_available(), "semgrep": semgrep_available(), "ai": ai_enabled()},
+    }
 
-# Include routers
+
 app.include_router(api_router)
 app.include_router(auth_router)
 app.include_router(analysis_router)
 
-# CORS middleware
-# FIX: Updated to prioritize local development and your specific Netlify domain
-origins = [
-    "http://localhost:3000",
-    "https://codevigil.netlify.app" # Add your actual Netlify URL here
-]
-
+DEFAULT_ORIGINS = "http://localhost:3000,https://codevigil.netlify.app"
+origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", DEFAULT_ORIGINS).split(",") if o.strip()]
+# Opt-in pattern for preview deploys, e.g. ^https://deploy-preview-\d+--codevigil\.netlify\.app$
+# Credentialed CORS for previews means any deploy preview can call the API as the visitor, so only
+# enable it when previews are never built from untrusted (fork) pull requests.
+origin_regex = os.environ.get("CORS_ORIGIN_REGEX") or None
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=origins if os.environ.get('ENV') == 'prod' else ['*'],
+    allow_origin_regex=origin_regex if os.environ.get("ENV") == "prod" else None,
+    allow_origins=origins if os.environ.get("ENV") == "prod" else ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
-

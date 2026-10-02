@@ -1,0 +1,11 @@
+line-length = 150
+target-version = "py311"
+extend-exclude = ["venv", "tests/fixtures"]
+
+[lint]
+select = ["E", "F", "W", "B", "S"]
+# E701/E702: compact `score += x; issues.append(...)` lines in the complexity scorer are intentional
+ignore = ["E701", "E702", "E731", "S101", "S603", "S607", "B008"]
+
+[lint.per-file-ignores]
+"tests/*" = ["S105", "S106", "S108"]

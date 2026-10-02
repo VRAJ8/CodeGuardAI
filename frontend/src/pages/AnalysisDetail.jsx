@@ -1,727 +1,659 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
-import { API } from "@/App";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Progress } from "@/components/ui/progress";
-import { 
-  Shield, ArrowLeft, AlertTriangle, Bug, FileCode, 
-  ExternalLink, Trash2, CheckCircle, XCircle,
-  ChevronDown, ChevronUp, Code2, Download, FileText, FileJson
-} from "lucide-react";
 import { toast } from "sonner";
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
-import { jsPDF } from "jspdf"; 
-import autoTable from "jspdf-autotable";
+import {
+  ExternalLink, Trash2, Download, FileText, FileJson, ShieldCheck, Package, Gauge, Rocket, Search, ChevronDown,
+  Sparkles, Copy, Check, RefreshCw, AlertTriangle, CheckCircle2, Clock, FileCode, Code2, KeyRound, XCircle, Star,
+} from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import AppShell from "@/components/AppShell";
+import { Delta, EmptyState, GradeSticker, SeverityBadge, SeverityBar, Spinner } from "@/components/viz";
+import { API, BACKEND_URL, compact, downloadFromApi, normalizeAnalysis, severityCounts, timeAgo } from "@/lib/api";
+import { exportPdf } from "@/lib/report";
+import { GRADE, SCANNERS, SEVERITY_ORDER, gradeFor, languageColor } from "@/lib/theme";
 
-export default function AnalysisDetail() {
-  const navigate = useNavigate();
-  const { id } = useParams();
-  const [analysis, setAnalysis] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [expandedRisks, setExpandedRisks] = useState({});
-  const [showRefactor, setShowRefactor] = useState({});
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false); // NEW: Modal State
+const STAGES = [
+  "Fetching source", "Running secret & pattern rules", "Running SAST engines (Bandit, Semgrep)",
+  "Resolving dependencies against OSV.dev", "Measuring complexity & maintainability", "AI triage & patch generation",
+];
+const OWASP_NAMES = {
+  "A01:2021": "Broken Access Control", "A02:2021": "Cryptographic Failures", "A03:2021": "Injection",
+  "A04:2021": "Insecure Design", "A05:2021": "Security Misconfiguration", "A06:2021": "Vulnerable Components",
+  "A07:2021": "Auth Failures", "A08:2021": "Integrity Failures", "A09:2021": "Logging Failures", "A10:2021": "SSRF",
+};
 
-  const languageColors = {
-    python: "#3572A5",
-    javascript: "#F7DF1E",
-    typescript: "#3178C6",
-    java: "#B07219",
-    go: "#00ADD8",
-    rust: "#DEA584",
-    unknown: "#6366F1"
-  };
-
-  useEffect(() => {
-    fetchAnalysis();
-  }, [id]);
-
-  const fetchAnalysis = async () => {
-    try {
-      const response = await axios.get(`${API}/analysis/${id}`);
-      setAnalysis(response.data);
-    } catch (error) {
-      console.error("Error fetching analysis:", error);
-      toast.error("Failed to load analysis");
-      navigate("/dashboard");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    try {
-      await axios.delete(`${API}/analysis/${id}`);
-      toast.success("Analysis deleted");
-      navigate("/dashboard");
-    } catch (error) {
-      toast.error("Failed to delete analysis");
-    }
-  };
-
-  // --- EXPORT LOGIC ---
-  const handleExportJSON = () => {
-    try {
-      const dataStr = JSON.stringify(analysis, null, 2);
-      const blob = new Blob([dataStr], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `CodeGuard_Audit_${analysis.name}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      toast.success("JSON report downloaded!");
-    } catch (error) {
-      toast.error("Failed to generate JSON");
-    }
-  };
-
-  const handleExportPDF = () => {
-    try {
-      const doc = new jsPDF();
-      
-      doc.setFontSize(20);
-      doc.setTextColor(0, 229, 153);
-      doc.text("CodeGuard AI Security Audit", 14, 20);
-      
-      doc.setFontSize(10);
-      doc.setTextColor(100, 100, 100);
-      doc.text(`Project: ${analysis?.name || "N/A"}`, 14, 30);
-      doc.text(`Status: COMPLETED`, 14, 35);
-      doc.text(`Score: ${analysis?.overall_score || 0}%`, 14, 40);
-
-      doc.setFontSize(14);
-      doc.setTextColor(0, 0, 0);
-      doc.text("AI Summary", 14, 50);
-      doc.setFontSize(10);
-      doc.setTextColor(60, 60, 60);
-      const summary = analysis?.ai_summary || "AI analysis completed based on code heuristics.";
-      const splitSummary = doc.splitTextToSize(summary, 180);
-      doc.text(splitSummary, 14, 56);
-
-      let currentY = 60 + (splitSummary.length * 5);
-
-      // --- ADD AI RECOMMENDATIONS TO PDF ---
-      if (analysis?.recommendations && analysis.recommendations.length > 0) {
-        doc.setFontSize(12);
-        doc.setTextColor(0, 0, 0);
-        doc.text("Key Recommendations:", 14, currentY);
-        currentY += 6;
-        
-        doc.setFontSize(9);
-        doc.setTextColor(80, 80, 80);
-        analysis.recommendations.forEach(rec => {
-           const splitRec = doc.splitTextToSize(`• ${rec}`, 180);
-           doc.text(splitRec, 14, currentY);
-           currentY += (splitRec.length * 4) + 2;
-        });
-      }
-
-      currentY += 5;
-      
-      // --- ADD SECURITY ISSUES TABLE ---
-      const tableData = (analysis?.security_issues || []).map(issue => [
-        (issue?.severity || "LOW").toUpperCase(),
-        issue?.type || "General Issue",
-        issue?.file_path || "Unknown",
-        issue?.line_number?.toString() || "-"
-      ]);
-
-      if (tableData.length > 0) {
-          autoTable(doc, {
-            startY: currentY,
-            head: [["Severity", "Issue", "File", "Line"]],
-            body: tableData,
-            theme: 'grid',
-            headStyles: { fillColor: [23, 23, 23] },
-            styles: { fontSize: 8 },
-            didParseCell: (data) => {
-              if (data.section === 'body' && data.column.index === 0) {
-                if (data.cell.raw === 'CRITICAL') data.cell.styles.textColor = [255, 77, 77];
-                if (data.cell.raw === 'HIGH') data.cell.styles.textColor = [245, 158, 11];
-              }
-            }
-          });
-      }
-
-      // --- ADD AI REFACTORED CODE (NEW PAGE) ---
-      if (analysis?.ai_refactors && analysis.ai_refactors.length > 0) {
-          doc.addPage();
-          doc.setFontSize(16);
-          doc.setTextColor(99, 102, 241); // Indigo color
-          doc.text("AI Architectural Refactors", 14, 20);
-          
-          let refactorY = 30;
-          analysis.ai_refactors.forEach(refactor => {
-              if (refactorY > 250) { doc.addPage(); refactorY = 20; }
-              
-              doc.setFontSize(11);
-              doc.setTextColor(0, 0, 0);
-              doc.text(`File: ${refactor.file_path}`, 14, refactorY);
-              refactorY += 5;
-              
-              doc.setFontSize(9);
-              doc.setTextColor(100, 100, 100);
-              const expLines = doc.splitTextToSize(`Reason: ${refactor.explanation}`, 180);
-              doc.text(expLines, 14, refactorY);
-              refactorY += (expLines.length * 4) + 5;
-              
-              doc.setFont("courier", "normal");
-              doc.setFontSize(8);
-              doc.setTextColor(50, 50, 50);
-              const codeLines = doc.splitTextToSize(refactor.refined_code, 180);
-              
-              // Only print first 40 lines of code to save space if it's huge
-              const linesToPrint = codeLines.slice(0, 40); 
-              doc.text(linesToPrint, 14, refactorY);
-              refactorY += (linesToPrint.length * 3.5) + 15;
-              doc.setFont("helvetica", "normal");
-          });
-      }
-
-      doc.save(`CodeGuard_${analysis?.name || 'Report'}.pdf`);
-      toast.success("PDF report generated!");
-    } catch (error) {
-      console.error("PDF EXPORT ERROR:", error);
-      toast.error("Generation failed. See F12 Console.");
-    }
-  };
-
-  const toggleRisk = (path) => {
-    setExpandedRisks(prev => ({ ...prev, [path]: !prev[path] }));
-  };
-
-  const getScoreColor = (score) => {
-    if (score >= 80) return "#00E599";
-    if (score >= 60) return "#F59E0B";
-    return "#FF4D4D";
-  };
-
-  const getSeverityColor = (severity) => {
-    switch (severity) {
-      case "critical": return "#FF4D4D";
-      case "high": return "#F59E0B";
-      case "medium": return "#6366F1";
-      case "low": return "#00E599";
-      default: return "#A1A1AA";
-    }
-  };
-
-  // --- RENDERING LOGIC ---
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#050505] flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-[#00E599] border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (!analysis || Object.keys(analysis).length === 0) {
-    return (
-      <div className="min-h-screen bg-[#050505] flex flex-col items-center justify-center text-[#A1A1AA]">
-        <div className="w-8 h-8 border-2 border-[#6366F1] border-t-transparent rounded-full animate-spin mb-4" />
-        <p className="animate-pulse font-mono text-sm tracking-widest">SYNCHRONIZING ANALYSIS DATA...</p>
-      </div>
-    );
-  }
-
-  const languageData = analysis.metrics?.languages ? 
-    Object.entries(analysis.metrics.languages).map(([name, value]) => ({
-      name,
-      value,
-      color: languageColors[name] || languageColors.unknown
-    })) : [];
-
-  const severityCounts = {
-    critical: analysis.security_issues?.filter(i => i.severity === "critical").length || 0,
-    high: analysis.security_issues?.filter(i => i.severity === "high").length || 0,
-    medium: analysis.security_issues?.filter(i => i.severity === "medium").length || 0,
-    low: analysis.security_issues?.filter(i => i.severity === "low").length || 0,
-  };
-
+function CopyButton({ text, label = "Copy", dark = false }) {
+  const [done, setDone] = useState(false);
   return (
-    <div className="min-h-screen bg-[#050505]" data-testid="analysis-detail">
-      
-      {/* CUSTOM DELETE MODAL */}
-      {deleteModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-[#0A0A0A] border border-[#27272A] p-6 rounded-lg shadow-2xl max-w-md w-full mx-4 zoom-in-95">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="bg-red-500/10 p-2 rounded-full">
-                <Trash2 className="w-5 h-5 text-red-500" />
-              </div>
-              <h3 className="text-lg font-bold text-white">Delete Analysis?</h3>
-            </div>
-            <p className="text-sm text-[#A1A1AA] mb-6 leading-relaxed">
-              Are you sure you want to permanently delete this code review? This action cannot be undone and all AI suggestions will be lost.
-            </p>
-            <div className="flex justify-end gap-3">
-              <Button 
-                variant="ghost" 
-                onClick={() => setDeleteModalOpen(false)} 
-                className="text-gray-400 hover:text-white hover:bg-[#171717]"
-              >
-                Cancel
-              </Button>
-              <Button 
-                className="bg-red-500 hover:bg-red-600 text-white font-semibold border-none" 
-                onClick={() => {
-                  setDeleteModalOpen(false);
-                  handleDelete();
-                }}
-              >
-                Yes, Delete
-              </Button>
-            </div>
+    <button className={`${dark ? "btn-dark" : "btn-secondary"} btn-sm`} onClick={() => {
+      navigator.clipboard.writeText(text);
+      setDone(true);
+      setTimeout(() => setDone(false), 1500);
+    }}>
+      {done ? <Check className="w-3.5 h-3.5" strokeWidth={3} /> : <Copy className="w-3.5 h-3.5" strokeWidth={2.5} />} {done ? "Copied!" : label}
+    </button>
+  );
+}
+
+function ScanningView({ analysis }) {
+  const current = analysis.progress?.stage || "Queued";
+  const idx = STAGES.indexOf(current);
+  return (
+    <div className="max-w-2xl mx-auto py-6">
+      <div className="card p-8">
+        <span className="sticker bg-cobalt text-white"><span className="w-2 h-2 rounded-full bg-yel blink" /> Scanning</span>
+        <h1 className="mt-4 font-display text-4xl font-extrabold break-words">{analysis.name}</h1>
+        <div className="mt-6 h-7 rounded-full border-[2.5px] border-ink bg-snow overflow-hidden p-[3px]">
+          <div className="h-full rounded-full progress-stripes transition-all duration-700" style={{ width: `${analysis.progress?.pct || 5}%` }} />
+        </div>
+        <div className="mt-1.5 text-right font-mono text-xs font-bold">{analysis.progress?.pct || 5}%</div>
+        <ol className="mt-6 space-y-2">
+          {STAGES.map((s, i) => {
+            const state = idx > i ? "done" : idx === i ? "active" : "todo";
+            return (
+              <li key={s} className={`flex items-center gap-3 p-2.5 rounded-[10px] border-2 text-[15px] font-semibold ${
+                state === "active" ? "border-ink bg-yel shadow-brut-sm" : state === "done" ? "border-transparent" : "border-transparent text-faint"}`}>
+                {state === "done" ? <span className="w-6 h-6 grid place-items-center rounded-md border-2 border-ink bg-mint"><Check className="w-3.5 h-3.5" strokeWidth={3.5} /></span> :
+                 state === "active" ? <span className="w-6 h-6 rounded-md border-2 border-ink bg-snow grid place-items-center"><span className="w-2.5 h-2.5 bg-ink rounded-sm animate-spin" /></span> :
+                 <span className="w-6 h-6 rounded-md border-2 border-faint" />}
+                {s}
+              </li>
+            );
+          })}
+        </ol>
+        <p className="mt-6 text-[13px] text-sub">You can leave this page. The scan keeps running and shows up in your history.</p>
+      </div>
+    </div>
+  );
+}
+
+function FindingRow({ issue, fix, open, onToggle }) {
+  return (
+    <div className={`border-b-2 border-ink/10 last:border-0 ${open ? "bg-cream/60" : ""}`}>
+      <button onClick={onToggle} className="w-full flex items-start gap-3 px-4 py-4 text-left hover:bg-cream/60">
+        <span className="w-[84px] shrink-0"><SeverityBadge severity={issue.severity} /></span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-bold">{issue.type}</span>
+            {issue.is_new && <span className="sticker !h-5 !px-1.5 !text-[10px] bg-yel rotate-3">NEW</span>}
+            {issue.suppression && <span className="sticker !h-5 !px-1.5 !text-[10px] bg-cream">SUPPRESSED</span>}
+            {fix && <span className="sticker !h-5 !px-1.5 !text-[10px] bg-lilac -rotate-2"><Sparkles className="w-2.5 h-2.5" strokeWidth={3} /> AI patch</span>}
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-sub">
+            <code className="font-mono font-bold text-ink">{issue.file_path}{issue.line_number ? `:${issue.line_number}` : ""}</code>
+            {issue.cwe && <span className="font-mono">{issue.cwe}</span>}
+            {issue.owasp && <span>{issue.owasp.split(":")[0]} {OWASP_NAMES[issue.owasp]}</span>}
+            {issue.scanner && <span>via {SCANNERS[issue.scanner]?.label || issue.scanner}</span>}
           </div>
         </div>
-      )}
-
-      <nav className="fixed top-0 left-0 right-0 z-50 glass border-b border-white/5">
-        <div className="max-w-7xl mx-auto px-6 md:px-12">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-4">
-              <Button 
-                variant="ghost" 
-                size="icon"
-                onClick={() => navigate("/dashboard")}
-                className="btn-ghost"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </Button>
-              <div>
-                <div className="font-bold text-lg tracking-tight">{analysis.name}</div>
-                <div className="text-xs text-[#A1A1AA]">
-                  {new Date(analysis.created_at).toLocaleString()}
-                </div>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <Button 
-                variant="ghost" 
-                className="btn-ghost text-xs bg-[#171717] hover:bg-[#27272A]"
-                onClick={handleExportPDF}
-              >
-                <FileText className="w-4 h-4 mr-2 text-[#00E599]" />
-                PDF
-              </Button>
-              <Button 
-                variant="ghost" 
-                className="btn-ghost text-xs bg-[#171717] hover:bg-[#27272A]"
-                onClick={handleExportJSON}
-              >
-                <FileJson className="w-4 h-4 mr-2 text-[#6366F1]" />
-                JSON
-              </Button>
-
-              <div className="w-px h-6 bg-[#27272A] mx-2"></div>
-
-              {analysis.source_url && (
-                <Button 
-                  variant="ghost" 
-                  className="btn-ghost"
-                  onClick={() => window.open(analysis.source_url, "_blank")}
-                >
-                  <ExternalLink className="w-4 h-4 mr-2" />
-                  Source
-                </Button>
-              )}
-              <Button 
-                variant="ghost" 
-                className="btn-ghost text-[#FF4D4D] hover:text-[#FF4D4D] hover:bg-[#FF4D4D]/10"
-                onClick={() => setDeleteModalOpen(true)}
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      <main className="pt-24 pb-12 px-6 md:px-12">
-        <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-            <div className="md:col-span-1 card-dark p-6">
-              <div className="text-center">
-                <div className="relative w-32 h-32 mx-auto mb-4">
-                  <svg className="w-full h-full transform -rotate-90">
-                    <circle cx="64" cy="64" r="56" fill="none" stroke="#171717" strokeWidth="8" />
-                    <circle
-                      cx="64" cy="64" r="56" fill="none"
-                      stroke={getScoreColor(analysis.overall_score)}
-                      strokeWidth="8"
-                      strokeDasharray={`${(analysis.overall_score / 100) * 352} 352`}
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span 
-                      className="text-4xl font-bold"
-                      style={{ color: getScoreColor(analysis.overall_score) }}
-                    >
-                      {analysis.overall_score?.toFixed(0)}
-                    </span>
-                  </div>
-                </div>
-                <div className="text-sm text-[#A1A1AA]">Overall Score</div>
-              </div>
-            </div>
-
-            <div className="md:col-span-3 grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="card-dark p-4">
-                <FileCode className="w-5 h-5 text-[#6366F1] mb-2" />
-                <div className="text-2xl font-bold">{analysis.metrics?.total_files || 0}</div>
-                <div className="text-xs text-[#A1A1AA]">Files Analyzed</div>
-              </div>
-              <div className="card-dark p-4">
-                <Code2 className="w-5 h-5 text-[#00E599] mb-2" />
-                <div className="text-2xl font-bold">{analysis.metrics?.total_lines?.toLocaleString() || 0}</div>
-                <div className="text-xs text-[#A1A1AA]">Lines of Code</div>
-              </div>
-              <div className="card-dark p-4">
-                <AlertTriangle className="w-5 h-5 text-[#FF4D4D] mb-2" />
-                <div className="text-2xl font-bold">{analysis.security_issues?.length || 0}</div>
-                <div className="text-xs text-[#A1A1AA]">Security Issues</div>
-              </div>
-              <div className="card-dark p-4">
-                <Bug className="w-5 h-5 text-[#F59E0B] mb-2" />
-                <div className="text-2xl font-bold">{analysis.bug_risks?.length || 0}</div>
-                <div className="text-xs text-[#A1A1AA]">Bug Risks</div>
-              </div>
-            </div>
-          </div>
-
-          {analysis.ai_summary && (
-            <div className="card-dark p-6 mb-8 border-l-4 border-[#00E599]">
-              <h3 className="text-lg font-medium mb-2 flex items-center gap-2">
-                <Shield className="w-5 h-5 text-[#00E599]" />
-                AI Analysis Summary
-              </h3>
-              <p className="text-[#A1A1AA]">{analysis.ai_summary}</p>
-              {analysis.recommendations?.length > 0 && (
-                <div className="mt-4">
-                  <h4 className="text-sm font-medium mb-2">Recommendations:</h4>
-                  <ul className="space-y-2">
-                    {analysis.recommendations.map((rec, i) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-[#A1A1AA]">
-                        <CheckCircle className="w-4 h-4 text-[#00E599] mt-0.5 shrink-0" />
-                        {rec}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+        <ChevronDown className={`w-5 h-5 mt-0.5 transition-transform ${open ? "rotate-180" : ""}`} strokeWidth={2.5} />
+      </button>
+      {open && (
+        <div className="px-4 pb-5 md:pl-[112px] space-y-4">
+          {issue.suppression && (
+            <div className="p-3 rounded-[10px] border-2 border-dashed border-ink bg-cream text-[13px] font-semibold">
+              Suppressed in source by a <code className="font-mono">codeguard-ignore</code> marker
+              {issue.suppression.marker_line ? ` on line ${issue.suppression.marker_line}` : ""}
+              {issue.suppression.justification ? `: "${issue.suppression.justification}"` : " (no justification given)"}.
+              Not counted in the score or severity totals.
             </div>
           )}
-
-          <Tabs defaultValue="security" className="w-full">
-            <TabsList className="bg-[#0A0A0A] border border-[#27272A] rounded-sm p-1 mb-6">
-              <TabsTrigger value="security" className="data-[state=active]:bg-[#171717] data-[state=active]:text-white rounded-sm">
-                <AlertTriangle className="w-4 h-4 mr-2" />
-                Security Issues ({analysis.security_issues?.length || 0})
-              </TabsTrigger>
-              <TabsTrigger value="bugs" className="data-[state=active]:bg-[#171717] data-[state=active]:text-white rounded-sm">
-                <Bug className="w-4 h-4 mr-2" />
-                Bug Risks ({analysis.bug_risks?.length || 0})
-              </TabsTrigger>
-              <TabsTrigger value="metrics" className="data-[state=active]:bg-[#171717] data-[state=active]:text-white rounded-sm">
-                <FileCode className="w-4 h-4 mr-2" />
-                Metrics
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="security">
-              <div className="grid grid-cols-4 gap-4 mb-6">
-                {Object.entries(severityCounts).map(([severity, count]) => (
-                  <div key={severity} className={`card-dark p-4 border-l-4`} style={{ borderLeftColor: getSeverityColor(severity) }}>
-                    <div className="text-2xl font-bold">{count}</div>
-                    <div className="text-xs text-[#A1A1AA] capitalize">{severity}</div>
-                  </div>
-                ))}
+          {!(issue.snippet && issue.description?.startsWith("Found:")) && <p className="text-[15px] text-sub">{issue.description}</p>}
+          {issue.snippet && issue.scanner !== "secrets" && <pre className="code-block">{issue.snippet}</pre>}
+          <div className="flex gap-2.5 p-3.5 rounded-[10px] border-2 border-ink bg-mint/50 text-[15px]">
+            <ShieldCheck className="w-5 h-5 mt-0.5 shrink-0" strokeWidth={2.5} />
+            <span className="font-medium">{issue.recommendation}</span>
+          </div>
+          {fix && (
+            <div className="rounded-[12px] border-[2.5px] border-ink overflow-hidden shadow-brut">
+              <div className="flex items-center justify-between px-4 py-2.5 bg-lilac border-b-[2.5px] border-ink">
+                <span className="flex items-center gap-2 text-sm font-extrabold"><Sparkles className="w-4 h-4" strokeWidth={2.5} /> Suggested patch</span>
+                <CopyButton text={fix.fix_code} label="Copy patch" />
               </div>
-              <div className="space-y-3">
-                {analysis.security_issues?.length > 0 ? (
-                  analysis.security_issues.map((issue, i) => (
-                    <div key={i} className="card-dark p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-start gap-3 w-full">
-                          <div 
-                            className="px-2 py-1 rounded-sm text-xs font-medium uppercase"
-                            style={{ 
-                              backgroundColor: `${getSeverityColor(issue.severity)}20`,
-                              color: getSeverityColor(issue.severity),
-                              border: `1px solid ${getSeverityColor(issue.severity)}30`
-                            }}
-                          >
-                            {issue.severity}
-                          </div>
-                          <div className="flex-1">
-                            <div className="font-medium">{issue.type}</div>
-                            <div className="text-sm text-[#A1A1AA] mt-1">
-                              <code className="bg-[#171717] px-2 py-0.5 rounded-sm">
-                                {issue.file_path}
-                                {issue.line_number && `:${issue.line_number}`}
-                              </code>
-                            </div>
-                            <p className="text-sm text-[#A1A1AA] mt-2">{issue.description}</p>
-                            <div className="flex items-start gap-2 mt-3 p-3 bg-[#171717] rounded-sm">
-                              <CheckCircle className="w-4 h-4 text-[#00E599] mt-0.5 shrink-0" />
-                              <span className="text-sm text-[#A1A1AA]">{issue.recommendation}</span>
-                            </div>
-                            
-                            {/* --- AI FIX SECTION --- */}
-                            {analysis.ai_fixes && (
-                              <div className="mt-6 space-y-4">
-                                {analysis.ai_fixes
-                                  .filter(fix => fix.file_path === issue.file_path && 
-                                                (fix.issue_type === issue.type || fix.type === issue.type))
-                                  .slice(0, 1) 
-                                  .map((fix, fixIdx) => (
-                                    <div key={fixIdx} className="rounded-md border border-[#00E599]/30 bg-[#0A0A0A] overflow-hidden">
-                                      <div className="flex items-center justify-between bg-[#00E599]/10 px-4 py-2 border-b border-[#00E599]/20">
-                                        <div className="flex items-center gap-2">
-                                          <div className="h-2 w-2 rounded-full bg-[#00E599] animate-pulse" />
-                                          <span className="text-[10px] font-bold text-[#00E599] uppercase tracking-wider">
-                                            AI Suggested Patch
-                                          </span>
-                                        </div>
-                                        <Button 
-                                          variant="ghost" 
-                                          size="sm" 
-                                          className="h-7 text-[10px] hover:bg-[#00E599]/20 text-[#00E599] font-semibold"
-                                          onClick={() => {
-                                            navigator.clipboard.writeText(fix.fix_code);
-                                            toast.success("Code copied!");
-                                          }}
-                                        >
-                                          <Download className="w-3 h-3 mr-1" /> Copy Fix
-                                        </Button>
-                                      </div>
-                                      <div className="p-4">
-                                        <p className="text-xs text-gray-400 mb-3 leading-relaxed">
-                                          <span className="text-[#00E599] font-semibold">Pro Tip:</span> {fix.explanation}
-                                        </p>
-                                        <div className="relative group">
-                                          <pre className="text-[11px] font-mono text-gray-300 bg-[#050505] p-4 rounded border border-white/5 overflow-x-auto leading-6">
-                                            <code>{fix.fix_code}</code>
-                                          </pre>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="card-dark p-12 text-center">
-                    <CheckCircle className="w-12 h-12 text-[#00E599] mx-auto mb-4" />
-                    <p className="text-[#A1A1AA]">No security issues detected!</p>
-                  </div>
-                )}
+              <div className="p-4 space-y-3 bg-snow">
+                {fix.explanation && <p className="text-sm text-sub">{fix.explanation}</p>}
+                <pre className="code-block">{fix.fix_code}</pre>
               </div>
-            </TabsContent>
-
-            <TabsContent value="bugs">
-              <div className="space-y-3">
-                {analysis.bug_risks?.length > 0 ? (
-                  analysis.bug_risks
-                    .sort((a, b) => b.risk_score - a.risk_score)
-                    .map((risk, i) => (
-                      <div key={i} className="card-dark overflow-hidden">
-                        <div className="p-4 cursor-pointer" onClick={() => toggleRisk(risk.file_path)}>
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <Bug className="w-5 h-5" style={{ color: getScoreColor(100 - risk.risk_score) }} />
-                              <div>
-                                <div className="font-mono text-sm">{risk.file_path}</div>
-                                <div className="text-xs text-[#A1A1AA] mt-1">
-                                  Complexity: <span className="capitalize">{risk.complexity}</span>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <div className="text-right">
-                                <div className="text-lg font-bold" style={{ color: getScoreColor(100 - risk.risk_score) }}>
-                                  {risk.risk_score.toFixed(0)}%
-                                </div>
-                                <div className="text-xs text-[#A1A1AA]">Risk</div>
-                              </div>
-                              {expandedRisks[risk.file_path] ? <ChevronUp className="w-5 h-5 text-[#A1A1AA]" /> : <ChevronDown className="w-5 h-5 text-[#A1A1AA]" />}
-                            </div>
-                          </div>
-                          <div className="mt-3">
-                            <Progress value={risk.risk_score} className="h-2 bg-[#171717]" />
-                          </div>
-                        </div>
-                        {expandedRisks[risk.file_path] && risk.issues?.length > 0 && (
-                          <div className="px-4 pb-4 border-t border-[#27272A]">
-                            <div className="pt-4 space-y-2">
-                              {risk.issues.map((issue, j) => (
-                                <div key={j} className="flex items-start gap-2 text-sm">
-                                  <XCircle className="w-4 h-4 text-[#FF4D4D] mt-0.5 shrink-0" />
-                                  <span className="text-[#A1A1AA]">{issue}</span>
-                                </div>
-                              ))}
-                            </div>
-                            {/* --- PHASE 3: AI REFACTOR SECTION --- */}
-                            {analysis.ai_refactors && analysis.ai_refactors.find(r => risk.file_path.includes(r.file_path) || r.file_path.includes(risk.file_path)) && (
-                              <div className="mt-6 border-t border-white/5 pt-4">
-                                <div className="flex items-center justify-between mb-3">
-                                  <div className="flex items-center gap-2">
-                                    <div className="bg-[#6366F1]/20 p-1.5 rounded-sm">
-                                      <Code2 className="w-4 h-4 text-[#6366F1]" />
-                                    </div>
-                                    <div>
-                                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">AI Architectural Refactor</h4>
-                                      <p className="text-[10px] text-[#A1A1AA]">Complexity reduction & modularization</p>
-                                    </div>
-                                  </div>
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm" 
-                                    className={`h-7 text-[10px] transition-all ${
-                                      showRefactor[risk.file_path] 
-                                        ? 'bg-[#6366F1] text-white border-[#6366F1] hover:bg-[#4F46E5]' 
-                                        : 'bg-transparent text-[#6366F1] border-[#6366F1]/50 hover:bg-[#6366F1]/10'
-                                    }`}
-                                    onClick={() => setShowRefactor(prev => ({ ...prev, [risk.file_path]: !prev[risk.file_path] }))}
-                                  >
-                                    {showRefactor[risk.file_path] ? "View Original" : "✨ View Refactored Code"}
-                                  </Button>
-                                </div>
-
-                                {showRefactor[risk.file_path] ? (
-                                  <div className="space-y-3 animate-in fade-in zoom-in-95 duration-300">
-                                    <div className="bg-[#0A0A0A] border border-[#6366F1]/30 p-4 rounded-sm">
-                                      <p className="text-xs text-[#A1A1AA] mb-3 italic leading-relaxed">
-                                        <span className="text-[#6366F1] font-bold">Architect's Note:</span> {analysis.ai_refactors.find(r => risk.file_path.includes(r.file_path) || r.file_path.includes(risk.file_path)).explanation}
-                                      </p>
-                                      <div className="relative group">
-                                        <pre className="text-[11px] font-mono text-gray-300 bg-[#050505] p-4 rounded-sm border border-white/5 overflow-x-auto max-h-80 leading-relaxed whitespace-pre">
-                                          <code>{analysis.ai_refactors.find(r => risk.file_path.includes(r.file_path) || r.file_path.includes(risk.file_path)).refined_code}</code>
-                                        </pre>
-                                        <Button 
-                                          size="sm" 
-                                          className="absolute top-2 right-2 h-6 text-[9px] bg-[#6366F1] hover:bg-[#4F46E5] opacity-0 group-hover:opacity-100 transition-opacity"
-                                          onClick={() => {
-                                            navigator.clipboard.writeText(analysis.ai_refactors.find(r => risk.file_path.includes(r.file_path) || r.file_path.includes(risk.file_path)).refined_code);
-                                            toast.success("Refactored code copied!");
-                                          }}
-                                        >
-                                          Copy Clean Code
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="p-3 bg-[#171717]/30 rounded-sm border border-dashed border-white/10">
-                                    <p className="text-[10px] text-[#A1A1AA] text-center italic">
-                                      Logic is too complex. Click "View Refactored Code" to see the AI-optimized architecture.
-                                    </p>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))
-                ) : (
-                  <div className="card-dark p-12 text-center">
-                    <CheckCircle className="w-12 h-12 text-[#00E599] mx-auto mb-4" />
-                    <p className="text-[#A1A1AA]">No high-risk files detected!</p>
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-
-            <TabsContent value="metrics">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="card-dark p-6">
-                  <h3 className="text-lg mb-4">Language Distribution</h3>
-                  {languageData.length > 0 ? (
-                    <>
-                      <ResponsiveContainer width="100%" height={200}>
-                        <PieChart>
-                          <Pie data={languageData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={2} dataKey="value">
-                            {languageData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} />
-                            ))}
-                          </Pie>
-                          <Tooltip 
-                            contentStyle={{ 
-                              backgroundColor: '#171717', 
-                              border: '1px solid #27272A', 
-                              borderRadius: '6px',
-                              color: '#E4E4E7',
-                              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.5)'
-                            }}
-                            itemStyle={{ color: '#00E599', fontWeight: 'bold' }}
-                            formatter={(value, name) => [value, name]}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                      <div className="flex flex-wrap gap-3 mt-4">
-                        {languageData.map((lang) => (
-                          <div key={lang.name} className="flex items-center gap-2 text-sm">
-                            <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: lang.color }} />
-                            <span className="capitalize">{lang.name}</span>
-                            <span className="text-[#A1A1AA]">({lang.value} lines)</span>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="h-[200px] flex items-center justify-center text-[#A1A1AA]">No language data</div>
-                  )}
-                </div>
-
-                <div className="card-dark p-6">
-                  <h3 className="text-lg mb-4">Quality Metrics</h3>
-                  <div className="space-y-4">
-                    <div>
-                      <div className="flex items-center justify-between text-sm mb-2">
-                        <span className="text-[#A1A1AA]">Maintainability Index</span>
-                        <span className="font-medium" style={{ color: getScoreColor(analysis.metrics?.maintainability_index || 0) }}>
-                          {analysis.metrics?.maintainability_index?.toFixed(0) || 0}%
-                        </span>
-                      </div>
-                      <Progress value={analysis.metrics?.maintainability_index || 0} className="h-2 bg-[#171717]" />
-                    </div>
-                    <div>
-                      <div className="flex items-center justify-between text-sm mb-2">
-                        <span className="text-[#A1A1AA]">Average Complexity</span>
-                        <span className="font-medium">{analysis.metrics?.avg_complexity?.toFixed(1) || 0}</span>
-                      </div>
-                      <Progress value={Math.min(analysis.metrics?.avg_complexity || 0, 100)} className="h-2 bg-[#171717]" />
-                    </div>
-                    <div className="pt-4 border-t border-[#27272A]">
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <div className="text-[#A1A1AA]">Total Files</div>
-                          <div className="text-xl font-bold">{analysis.metrics?.total_files || 0}</div>
-                        </div>
-                        <div>
-                          <div className="text-[#A1A1AA]">Total Lines</div>
-                          <div className="text-xl font-bold">{analysis.metrics?.total_lines?.toLocaleString() || 0}</div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
-          </Tabs>
+            </div>
+          )}
+          {issue.cwe && (
+            <a className="inline-flex items-center gap-1 text-[13px] font-bold underline decoration-2 underline-offset-4 hover:text-cobalt" target="_blank" rel="noreferrer"
+               href={`https://cwe.mitre.org/data/definitions/${issue.cwe.replace("CWE-", "")}.html`}>
+              Read about {issue.cwe} <ExternalLink className="w-3.5 h-3.5" strokeWidth={2.5} />
+            </a>
+          )}
         </div>
-      </main>
+      )}
     </div>
+  );
+}
+
+function FindingsTab({ analysis }) {
+  const suppressedIssues = analysis.suppressed_issues || [];
+  const [showSuppressed, setShowSuppressed] = useState(false);
+  const issues = showSuppressed ? suppressedIssues : analysis.security_issues || [];
+  const counts = severityCounts(showSuppressed ? { security_issues: suppressedIssues } : analysis);
+  const [sev, setSev] = useState(null);
+  const [scanner, setScanner] = useState(null);
+  const [onlyNew, setOnlyNew] = useState(false);
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState({});
+  const scanners = [...new Set(issues.map((i) => i.scanner).filter(Boolean))];
+
+  const findFix = (issue) => (analysis.ai_fixes || []).find((f) =>
+    (f.file_path === issue.file_path || issue.file_path.endsWith(f.file_path || "~")) &&
+    (f.issue_type === issue.type || f.type === issue.type) && (!f.line || !issue.line_number || Number(f.line) === issue.line_number));
+
+  const shown = issues.filter((i) =>
+    (!sev || i.severity === sev) && (!scanner || i.scanner === scanner) && (!onlyNew || i.is_new) &&
+    (!q || `${i.type} ${i.file_path} ${i.cwe || ""} ${i.description}`.toLowerCase().includes(q.toLowerCase())));
+
+  if (!issues.length && !suppressedIssues.length) {
+    return <EmptyState icon={CheckCircle2} title="Zero findings. Clean." body="Every engine came back empty. Go touch grass. 🌱" />;
+  }
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="p-4 border-b-[2.5px] border-ink flex flex-col lg:flex-row gap-3 lg:items-center bg-cream/50">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2" strokeWidth={2.5} />
+          <input className="input !h-10 pl-10 text-sm" placeholder="Search file, CWE, rule…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <button className={`chip ${!sev ? "chip-active" : ""}`} onClick={() => setSev(null)}>All {issues.length}</button>
+          {SEVERITY_ORDER.filter((s) => counts[s]).map((s) => (
+            <button key={s} className={`chip capitalize ${sev === s ? "chip-active" : ""}`} onClick={() => setSev(sev === s ? null : s)}>{s} {counts[s]}</button>
+          ))}
+          {scanners.length > 1 && <span className="w-[2px] h-7 bg-ink/20 mx-1" />}
+          {scanners.length > 1 && scanners.map((s) => (
+            <button key={s} className={`chip ${scanner === s ? "chip-active" : ""}`} onClick={() => setScanner(scanner === s ? null : s)}>{SCANNERS[s]?.label || s}</button>
+          ))}
+          {analysis.baseline?.new > 0 && !showSuppressed && (
+            <button className={`chip ${onlyNew ? "chip-active" : "!bg-yel"}`} onClick={() => setOnlyNew(!onlyNew)}>New only {analysis.baseline.new}</button>
+          )}
+          {suppressedIssues.length > 0 && (
+            <button className={`chip ${showSuppressed ? "chip-active" : "border-dashed"}`}
+                    onClick={() => { setShowSuppressed(!showSuppressed); setSev(null); setScanner(null); setOnlyNew(false); }}>
+              {showSuppressed ? "← Active findings" : `Suppressed ${suppressedIssues.length}`}
+            </button>
+          )}
+        </div>
+      </div>
+      {shown.length ? shown.map((issue, i) => {
+        const key = issue.fingerprint || `${issue.file_path}-${issue.line_number}-${i}`;
+        return <FindingRow key={key} issue={issue} fix={findFix(issue)} open={!!open[key]} onToggle={() => setOpen((o) => ({ ...o, [key]: !o[key] }))} />;
+      }) : <div className="p-10 text-center text-sub">{issues.length ? "No findings match those filters." : "No active findings. Only suppressed ones remain."}</div>}
+    </div>
+  );
+}
+
+function DependenciesTab({ analysis }) {
+  const deps = analysis.dependencies || [];
+  const [vulnOnly, setVulnOnly] = useState(true);
+  const vulnerable = deps.filter((d) => d.vulnerabilities?.length);
+  const rows = (vulnOnly && vulnerable.length ? vulnerable : deps).slice().sort((a, b) => (b.vulnerabilities?.length || 0) - (a.vulnerabilities?.length || 0));
+  if (!deps.length) {
+    const osvFindings = (analysis.security_issues || []).filter((i) => i.scanner === "osv").length;
+    return osvFindings
+      ? <EmptyState icon={Package} title="Dependency inventory needs a re-scan"
+                    body={`This scan predates the SBOM engine. Its ${osvFindings} vulnerable-dependency finding(s) are under Findings; re-scan for the full package table.`} />
+      : <EmptyState icon={Package} title="No dependency manifests found" body="We read package.json, requirements*.txt and go.mod." />;
+  }
+  return (
+    <div className="card overflow-hidden">
+      <div className="p-4 border-b-[2.5px] border-ink flex flex-wrap items-center justify-between gap-3 bg-cream/50">
+        <div className="font-semibold"><span className="font-display text-2xl font-extrabold">{vulnerable.length}</span> of {deps.length} packages have known advisories</div>
+        <div className="flex flex-wrap gap-2">
+          <button className={`chip ${vulnOnly ? "chip-active" : ""}`} onClick={() => setVulnOnly(true)}>Vulnerable</button>
+          <button className={`chip ${!vulnOnly ? "chip-active" : ""}`} onClick={() => setVulnOnly(false)}>All packages</button>
+          <button className="btn-secondary btn-sm" onClick={() => downloadFromApi(`/analysis/${analysis.analysis_id}/sbom`, `${analysis.name}.cdx.json`)}>
+            <Download className="w-3.5 h-3.5" strokeWidth={2.5} /> SBOM
+          </button>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left">
+            <tr className="border-b-2 border-ink">
+              {["Package", "Version", "Ecosystem", "Advisories", "Fixed in"].map((h) => <th key={h} className="px-4 py-3 eyebrow !text-ink">{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((d) => {
+              const worst = SEVERITY_ORDER.find((s) => d.vulnerabilities?.some((v) => v.severity === s));
+              const fix = d.vulnerabilities?.map((v) => v.fixed_in).filter(Boolean).sort().pop();
+              return (
+                <tr key={`${d.manifest}-${d.name}`} className="border-b-2 border-ink/10 last:border-0 hover:bg-cream/60">
+                  <td className="px-4 py-3"><div className="font-bold">{d.name}</div><div className="text-[11px] text-sub font-mono">{d.manifest}{d.dev ? " · dev" : ""}</div></td>
+                  <td className="px-4 py-3 font-mono text-xs font-bold tabular">{d.version || <span className="text-faint">unpinned</span>}</td>
+                  <td className="px-4 py-3"><span className="chip !h-6">{d.ecosystem}</span></td>
+                  <td className="px-4 py-3">
+                    {d.vulnerabilities?.length ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <SeverityBadge severity={worst} />
+                        {d.vulnerabilities.slice(0, 3).map((v) => (
+                          <a key={v.id} href={`https://osv.dev/vulnerability/${v.id}`} target="_blank" rel="noreferrer"
+                             className="font-mono text-[11px] font-bold underline decoration-2 underline-offset-2 hover:text-cobalt" title={v.summary}>
+                            {v.aliases?.find((a) => a.startsWith("CVE")) || v.id}
+                          </a>
+                        ))}
+                        {d.vulnerabilities.length > 3 && <span className="text-[11px] text-sub">+{d.vulnerabilities.length - 3}</span>}
+                      </div>
+                    ) : <span className="text-xs text-faint">{d.version ? "none known" : "not checked"}</span>}
+                  </td>
+                  <td className="px-4 py-3">{fix ? <span className="font-mono text-xs font-bold px-1.5 py-0.5 rounded border-2 border-ink bg-mint">{fix}</span> : <span className="text-faint">—</span>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function HealthTab({ analysis }) {
+  const risks = (analysis.bug_risks || []).slice().sort((a, b) => b.risk_score - a.risk_score);
+  const [open, setOpen] = useState(null);
+  const refactorFor = (path) => (analysis.ai_refactors || []).find((r) => path.endsWith(r.file_path) || r.file_path?.endsWith(path));
+  const m = analysis.metrics || {};
+  const langs = Object.entries(m.languages || {});
+  const langTotal = langs.reduce((s, [, n]) => s + n, 0) || 1;
+  const riskColor = (r) => (r > 50 ? "#FF5A5F" : r > 25 ? "#FFE14D" : "#7CF0B4");
+  return (
+    <div className="space-y-5">
+      <div className="grid md:grid-cols-3 gap-5">
+        <div className="card p-5 bg-lime">
+          <div className="eyebrow !text-ink">Maintainability index</div>
+          <div className="mt-2 font-display text-5xl font-extrabold tabular">{Math.round(m.maintainability_index || 0)}<span className="text-xl">/100</span></div>
+          <div className="mt-3 h-4 rounded-full border-2 border-ink bg-snow p-[2px]"><div className="h-full rounded-full bg-ink" style={{ width: `${m.maintainability_index || 0}%` }} /></div>
+        </div>
+        <div className="card p-5 bg-lilac">
+          <div className="eyebrow !text-ink">{analysis.legacy ? "Avg file risk (legacy scan)" : "Avg cyclomatic complexity"}</div>
+          <div className="mt-2 font-display text-5xl font-extrabold tabular">{(m.avg_complexity || 0).toFixed(1)}</div>
+          <div className="mt-2 text-[13px] font-semibold">
+            {analysis.legacy ? "0–100 heuristic from the old engine · re-scan for Radon metrics" : <>per function · ≤5 is great, &gt;10 is spicy 🌶️</>}
+          </div>
+        </div>
+        <div className="card p-5">
+          <div className="eyebrow">Languages</div>
+          <div className="mt-3 flex h-5 gap-[2px] p-[2px] rounded-full border-2 border-ink overflow-hidden">
+            {langs.map(([l, n]) => <div key={l} className="rounded-full" style={{ width: `${(n / langTotal) * 100}%`, background: languageColor(l) }} title={`${l}: ${n} lines`} />)}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-[13px]">
+            {langs.map(([l, n]) => (
+              <span key={l} className="flex items-center gap-1.5"><span className="w-3 h-3 rounded border-2 border-ink" style={{ background: languageColor(l) }} />
+                <span className="capitalize font-semibold">{l}</span><span className="font-mono text-xs">{Math.round((n / langTotal) * 100)}%</span></span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {!risks.length ? <EmptyState icon={Gauge} title="No complexity hotspots" body="Every file is within healthy thresholds." /> : (
+        <div className="card overflow-hidden">
+          <div className="hidden md:grid grid-cols-[1fr_80px_80px_80px_80px_170px_24px] gap-4 px-4 py-3 border-b-[2.5px] border-ink bg-cream/50">
+            {["File", "Lines", "Avg CC", "Max CC", "MI"].map((h, i) => <span key={h} className={`eyebrow !text-ink ${i ? "text-right" : ""}`}>{h}</span>)}
+            <span className="eyebrow !text-ink">Risk</span><span />
+          </div>
+          {risks.map((r) => {
+            const refactor = refactorFor(r.file_path);
+            const isOpen = open === r.file_path;
+            return (
+              <div key={r.file_path} className="border-b-2 border-ink/10 last:border-0">
+                <button onClick={() => setOpen(isOpen ? null : r.file_path)}
+                        className="w-full grid grid-cols-[1fr_auto] md:grid-cols-[1fr_80px_80px_80px_80px_170px_24px] gap-4 items-center px-4 py-3.5 text-left hover:bg-cream/60">
+                  <span className="min-w-0 flex items-center gap-2">
+                    <FileCode className="w-4 h-4 shrink-0" strokeWidth={2.5} />
+                    <code className="truncate font-mono text-[13px] font-bold">{r.file_path}</code>
+                    {refactor && <span className="sticker !h-5 !px-1.5 !text-[10px] bg-lilac"><Sparkles className="w-2.5 h-2.5" strokeWidth={3} /> AI</span>}
+                  </span>
+                  {[r.lines || "—", r.cyclomatic ? r.cyclomatic.toFixed(1) : "—", r.max_cyclomatic || "—", r.maintainability != null ? Math.round(r.maintainability) : "—"].map((v, i) => (
+                    <span key={i} className="hidden md:block text-right font-mono text-sm tabular">{v}</span>
+                  ))}
+                  <span className="flex items-center gap-2">
+                    <span className="hidden md:block flex-1 h-4 rounded-full border-2 border-ink bg-snow p-[2px]">
+                      <span className="block h-full rounded-full" style={{ width: `${r.risk_score}%`, background: riskColor(r.risk_score) }} />
+                    </span>
+                    <span className="font-mono text-xs font-bold w-7 text-right tabular">{Math.round(r.risk_score)}</span>
+                  </span>
+                  <ChevronDown className={`hidden md:block w-5 h-5 transition-transform ${isOpen ? "rotate-180" : ""}`} strokeWidth={2.5} />
+                </button>
+                {isOpen && (
+                  <div className="px-4 pb-5 md:pl-10 space-y-4">
+                    <ul className="space-y-1.5">
+                      {r.issues.map((i) => <li key={i} className="flex gap-2 text-[15px]"><XCircle className="w-4 h-4 mt-1 shrink-0 text-[#C2410C]" strokeWidth={2.5} />{i}</li>)}
+                    </ul>
+                    {r.hotspots?.length > 0 && (
+                      <div>
+                        <div className="eyebrow mb-2">Hotspot functions</div>
+                        <div className="flex flex-wrap gap-2">
+                          {r.hotspots.map((h) => (
+                            <span key={`${h.name}-${h.line}`} className="chip !h-8 font-mono">
+                              {h.name}<span className="text-sub">:{h.line}</span>
+                              <span className="px-1.5 rounded border-[1.5px] border-ink" style={{ background: GRADE[h.rank === "A" || h.rank === "B" ? "A" : h.rank === "C" ? "C" : "F"].color }}>CC {h.complexity} · {h.rank}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {refactor && (
+                      <div className="rounded-[12px] border-[2.5px] border-ink overflow-hidden shadow-brut">
+                        <div className="flex items-center justify-between px-4 py-2.5 bg-lilac border-b-[2.5px] border-ink">
+                          <span className="flex items-center gap-2 text-sm font-extrabold"><Sparkles className="w-4 h-4" strokeWidth={2.5} /> AI refactor</span>
+                          <CopyButton text={refactor.refined_code} label="Copy code" />
+                        </div>
+                        <div className="p-4 space-y-3 bg-snow">
+                          <p className="text-sm text-sub">{refactor.explanation}</p>
+                          <pre className="code-block max-h-96">{refactor.refined_code}</pre>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CodeCard({ title, body, code, bg = "bg-snow" }) {
+  return (
+    <div className="card overflow-hidden">
+      <div className={`flex items-center justify-between gap-3 px-5 py-4 border-b-[2.5px] border-ink ${bg}`}>
+        <div><div className="font-display text-lg font-extrabold">{title}</div><div className="text-[13px] mt-0.5">{body}</div></div>
+        <CopyButton text={code} />
+      </div>
+      <pre className="code-block !rounded-none !border-0 m-0">{code}</pre>
+    </div>
+  );
+}
+
+function ShipTab({ analysis }) {
+  const [badgeOk, setBadgeOk] = useState(true);
+  const badgeUrl = `${BACKEND_URL}/api/badge/${analysis.analysis_id}.svg`;
+  const badgeMd = `[![CodeGuard](${badgeUrl})](${window.location.href})`;
+  const workflow = `# .github/workflows/codeguard.yml
+name: CodeGuard
+on: [push, pull_request]
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: VRAJ8/CodeGuardAI@main
+        with:
+          fail-on: high          # block merges on high/critical findings
+      - uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: codeguard.sarif`;
+  const cli = `git clone https://github.com/VRAJ8/CodeGuardAI && cd CodeGuardAI/backend
+pip install -r requirements-cli.txt
+python -m codeguard scan /path/to/repo --fail-on high
+python -m codeguard scan /path/to/repo --format sarif -o codeguard.sarif`;
+  return (
+    <div className="grid xl:grid-cols-2 gap-5">
+      <CodeCard bg="bg-yel" title="Block risky PRs" body="Fails CI on high-severity findings and publishes them to GitHub's Security tab." code={workflow} />
+      <div className="space-y-5">
+        {badgeOk && <div className="card p-5 bg-pink">
+          <div className="font-display text-lg font-extrabold">README badge</div>
+          <div className="text-[13px] mt-0.5">Show off your grade. The badge reveals only this scan's grade and score.</div>
+          <div className="mt-4 p-4 rounded-[10px] border-2 border-ink bg-snow flex flex-wrap items-center justify-between gap-3">
+            <img src={badgeUrl} alt="CodeGuard badge" className="h-5" onError={() => setBadgeOk(false)} />
+            <CopyButton text={badgeMd} label="Copy markdown" dark />
+          </div>
+        </div>}
+        <CodeCard bg="bg-lime" title="Run it locally" body="Same engine as this dashboard, as a CLI." code={cli} />
+        <div className="card p-5 flex flex-wrap gap-2">
+          <button className="btn-secondary btn-sm" onClick={() => downloadFromApi(`/analysis/${analysis.analysis_id}/sarif`, `${analysis.name}.sarif`)}>
+            <Download className="w-3.5 h-3.5" strokeWidth={2.5} /> SARIF 2.1.0
+          </button>
+          <button className="btn-secondary btn-sm" onClick={() => downloadFromApi(`/analysis/${analysis.analysis_id}/sbom`, `${analysis.name}.cdx.json`)}>
+            <Download className="w-3.5 h-3.5" strokeWidth={2.5} /> CycloneDX SBOM
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const TABS = [
+  { key: "findings", label: "Findings", icon: AlertTriangle },
+  { key: "deps", label: "Dependencies", icon: Package },
+  { key: "health", label: "Code health", icon: Gauge },
+  { key: "ship", label: "Ship it", icon: Rocket },
+];
+
+export default function AnalysisDetail() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [analysis, setAnalysis] = useState(null);
+  const [tab, setTab] = useState("findings");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const timer = useRef();
+  const wasProcessing = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const data = normalizeAnalysis((await axios.get(`${API}/analysis/${id}`)).data);
+        if (cancelled) return;
+        setAnalysis(data);
+        if (data.status === "processing") {
+          wasProcessing.current = true;
+          timer.current = setTimeout(load, 1500);
+        } else if (data.status === "completed" && wasProcessing.current) {
+          toast.success(`Scan complete: grade ${data.grade} ${GRADE[data.grade]?.emoji || ""}`);
+        }
+      } catch {
+        toast.error("Analysis not found");
+        navigate("/dashboard");
+      }
+    };
+    load();
+    return () => { cancelled = true; clearTimeout(timer.current); };
+  }, [id, navigate]);
+
+  const counts = useMemo(() => severityCounts(analysis), [analysis]);
+
+  const [rescanning, setRescanning] = useState(false);
+  const rescan = async () => {
+    if (rescanning) return;
+    setRescanning(true);
+    try {
+      const { data } = await axios.post(`${API}/analysis/github`, { github_url: analysis.source_url, name: analysis.name });
+      navigate(`/analysis/${data.analysis_id}`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't start re-scan");
+    } finally {
+      setRescanning(false);
+    }
+  };
+
+  const remove = async () => {
+    try {
+      await axios.delete(`${API}/analysis/${id}`);
+      toast.success("Scan deleted");
+      navigate("/history");
+    } catch {
+      toast.error("Delete failed");
+    }
+  };
+
+  if (!analysis) return <AppShell title="Scan"><Spinner /></AppShell>;
+  if (analysis.status === "processing") return <AppShell title={analysis.name}><ScanningView analysis={analysis} /></AppShell>;
+
+  if (analysis.status === "failed") {
+    return (
+      <AppShell title={analysis.name}>
+        <div className="max-w-xl mx-auto py-10">
+          <EmptyState icon={XCircle} title="Scan failed 💀" body={analysis.error || analysis.ai_summary || "Something went wrong."}
+            action={<div className="flex justify-center gap-2">
+              {analysis.source_url && <button className="btn-primary" onClick={rescan} disabled={rescanning}><RefreshCw className={`w-4 h-4 ${rescanning ? "animate-spin" : ""}`} strokeWidth={2.5} /> {rescanning ? "Starting…" : "Retry"}</button>}
+              <button className="btn-secondary" onClick={() => navigate("/new-analysis")}>New scan</button>
+            </div>} />
+        </div>
+      </AppShell>
+    );
+  }
+
+  const grade = analysis.grade || gradeFor(analysis.overall_score);
+  const g = GRADE[grade] || {};
+  const m = analysis.metrics || {};
+  const vulnDeps = analysis.dependencies?.length
+    ? analysis.dependencies.filter((d) => d.vulnerabilities?.length).length
+    : (analysis.security_issues || []).filter((i) => i.scanner === "osv").length;
+  const secrets = (analysis.security_issues || []).filter((i) => i.scanner === "secrets").length;
+  const tabCount = { findings: analysis.security_issues?.length, deps: vulnDeps || undefined, health: analysis.bug_risks?.length };
+
+  const actions = (
+    <>
+      {analysis.source_url && (
+        <button className="btn-ghost btn-sm hidden sm:inline-flex" onClick={rescan} disabled={rescanning}><RefreshCw className={`w-4 h-4 ${rescanning ? "animate-spin" : ""}`} strokeWidth={2.5} /> {rescanning ? "Scanning…" : "Re-scan"}</button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button className="btn-primary btn-sm"><Download className="w-4 h-4" strokeWidth={2.5} /> Export</button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56 bg-snow border-[2.5px] border-ink shadow-brut rounded-[12px] p-1.5 text-ink font-semibold">
+          <DropdownMenuItem className="rounded-lg focus:bg-yel" onClick={() => { exportPdf(analysis); toast.success("PDF report generated"); }}><FileText className="w-4 h-4 mr-2" /> PDF audit report</DropdownMenuItem>
+          <DropdownMenuItem className="rounded-lg focus:bg-yel" onClick={() => downloadFromApi(`/analysis/${id}/sarif`, `${analysis.name}.sarif`)}><ShieldCheck className="w-4 h-4 mr-2" /> SARIF (Code Scanning)</DropdownMenuItem>
+          <DropdownMenuItem className="rounded-lg focus:bg-yel" onClick={() => downloadFromApi(`/analysis/${id}/sbom`, `${analysis.name}.cdx.json`)}><Package className="w-4 h-4 mr-2" /> CycloneDX SBOM</DropdownMenuItem>
+          <DropdownMenuSeparator className="bg-ink/20" />
+          <DropdownMenuItem className="rounded-lg focus:bg-yel" onClick={() => {
+            const url = URL.createObjectURL(new Blob([JSON.stringify(analysis, null, 2)], { type: "application/json" }));
+            Object.assign(document.createElement("a"), { href: url, download: `${analysis.name}.json` }).click();
+            URL.revokeObjectURL(url);
+          }}><FileJson className="w-4 h-4 mr-2" /> Raw JSON</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {confirmDelete ? (
+        <span className="flex items-center gap-1">
+          <button className="btn btn-sm !bg-cherry" onClick={remove}>Delete</button>
+          <button className="btn-ghost btn-sm" onClick={() => setConfirmDelete(false)}>Cancel</button>
+        </span>
+      ) : (
+        <button className="btn-secondary btn-sm !px-2.5" onClick={() => setConfirmDelete(true)} aria-label="Delete scan"><Trash2 className="w-4 h-4" strokeWidth={2.5} /></button>
+      )}
+    </>
+  );
+
+  return (
+    <AppShell title={analysis.name} actions={actions}>
+      {/* Hero */}
+      <section className="card p-6 md:p-8 fade-up">
+        <div className="grid lg:grid-cols-[auto_1fr_auto] gap-8 items-center">
+          <GradeSticker score={analysis.overall_score} grade={grade} label="Overall score" />
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 text-[13px]">
+              <span className="chip">{analysis.source_type === "github" ? "GitHub" : "ZIP upload"}</span>
+              {analysis.repo_meta?.ref && <span className="chip font-mono">{analysis.repo_meta.ref}</span>}
+              {analysis.repo_meta?.stars != null && <span className="chip"><Star className="w-3 h-3" strokeWidth={3} /> {compact(analysis.repo_meta.stars)}</span>}
+              <span className="flex items-center gap-1 text-sub font-medium"><Clock className="w-3.5 h-3.5" strokeWidth={2.5} /> {timeAgo(analysis.created_at)}</span>
+              {analysis.duration_ms && <span className="text-sub font-medium">· scanned in {(analysis.duration_ms / 1000).toFixed(1)}s</span>}
+            </div>
+            <h1 className="mt-3 font-display text-4xl md:text-5xl font-extrabold leading-none break-words">{analysis.name}</h1>
+            <div className="mt-3"><span className="sticker -rotate-2" style={{ background: g.color }}>{g.emoji} {g.vibe}</span></div>
+            {analysis.repo_meta?.description && <p className="mt-3 text-sub line-clamp-2">{analysis.repo_meta.description}</p>}
+            {analysis.baseline && (
+              <div className="mt-4 inline-flex flex-wrap items-center gap-3 px-3 py-2 rounded-[10px] border-2 border-ink bg-cream text-[13px] font-semibold">
+                <span>vs previous scan</span>
+                <Delta value={analysis.baseline.score_delta} suffix=" pts" />
+                <span className="px-2 rounded border-2 border-ink bg-yel">{analysis.baseline.new} new</span>
+                <span className="px-2 rounded border-2 border-ink bg-mint">{analysis.baseline.fixed} fixed</span>
+              </div>
+            )}
+            <div className="mt-5 max-w-xl"><SeverityBar counts={counts} /></div>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-1 gap-2.5 lg:w-52">
+            {[
+              [FileCode, "Files", m.total_files, "bg-snow"],
+              [Code2, "Lines", compact(m.total_lines), "bg-snow"],
+              [KeyRound, "Secrets", secrets, secrets ? "bg-yel" : "bg-snow"],
+              [Package, "Vuln deps", vulnDeps, vulnDeps ? "bg-tang" : "bg-snow"],
+            ].map(([Icon, label, v, bg]) => (
+              <div key={label} className={`flex items-center gap-3 px-3 py-2.5 rounded-[10px] border-2 border-ink ${bg}`}>
+                <Icon className="w-4 h-4" strokeWidth={2.5} />
+                <span className="text-[13px] font-semibold">{label}</span>
+                <span className="ml-auto font-display text-xl font-extrabold tabular">{v ?? 0}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        {analysis.scan_errors?.length > 0 && (
+          <div className="mt-6 p-3 rounded-[10px] border-2 border-ink bg-tang text-[13px] font-semibold">
+            {analysis.scan_errors.map((e) => <div key={e}>⚠️ {e}. Results may be incomplete; re-scan to retry.</div>)}
+          </div>
+        )}
+        {analysis.scan_warnings?.length > 0 && (
+          <div className="mt-3 p-3 rounded-[10px] border-2 border-dashed border-ink bg-cream text-[13px] font-mono">
+            {analysis.scan_warnings.slice(0, 5).map((w) => <div key={w}>{w}</div>)}
+            {analysis.scan_warnings.length > 5 && <div>+{analysis.scan_warnings.length - 5} more</div>}
+          </div>
+        )}
+        {analysis.scanners_run && (
+          <div className="mt-6 pt-5 border-t-2 border-ink flex flex-wrap items-center gap-2">
+            <span className="eyebrow mr-1">Engines</span>
+            {analysis.scanners_run.map((s) => (
+              <span key={s} className="chip" title={SCANNERS[s]?.blurb}>
+                <span className="w-2 h-2 rounded-full bg-mint border border-ink" /> {SCANNERS[s]?.label || s}
+                {analysis.scanner_counts?.[s] ? <span className="font-mono text-sub">{analysis.scanner_counts[s]}</span> : null}
+              </span>
+            ))}
+            {analysis.suppressed > 0 && (
+              <span className="chip border-dashed" title="Findings silenced by codeguard-ignore markers in the scanned code. See Findings → Suppressed.">
+                {analysis.suppressed} suppressed inline
+              </span>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* AI summary */}
+      {analysis.ai_summary && (
+        <section className="card mt-5 p-6 bg-lilac fade-up d-1">
+          <span className="sticker bg-snow -rotate-2"><Sparkles className="w-3.5 h-3.5" strokeWidth={3} /> AI triage</span>
+          <p className="mt-4 text-lg font-medium leading-relaxed">{analysis.ai_summary}</p>
+          {analysis.recommendations?.length > 0 && (
+            <ol className="mt-5 grid md:grid-cols-2 gap-3">
+              {analysis.recommendations.map((r, i) => (
+                <li key={r} className="flex gap-3 p-3 rounded-[10px] border-2 border-ink bg-snow text-[15px]">
+                  <span className="font-mono text-sm font-bold">{String(i + 1).padStart(2, "0")}</span>{r}
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      )}
+
+      {/* Tabs */}
+      <div className="mt-7 mb-5 flex gap-2 overflow-x-auto pb-1" role="tablist">
+        {TABS.map(({ key, label, icon: Icon }) => (
+          <button key={key} role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
+                  className={`flex items-center gap-2 px-4 h-11 rounded-[10px] border-[2.5px] text-[15px] font-bold whitespace-nowrap transition-all ${
+                    tab === key ? "bg-ink text-white border-ink shadow-[3px_3px_0_0_#3B5BFF]" : "bg-snow border-ink hover:-translate-y-0.5"}`}>
+            <Icon className="w-4 h-4" strokeWidth={2.5} /> {label}
+            {tabCount[key] ? <span className={`text-[11px] font-mono px-1.5 rounded ${tab === key ? "bg-yel text-ink" : "bg-cream border border-ink"}`}>{tabCount[key]}</span> : null}
+          </button>
+        ))}
+      </div>
+
+      <div className="fade-up">
+        {tab === "findings" && <FindingsTab analysis={analysis} />}
+        {tab === "deps" && <DependenciesTab analysis={analysis} />}
+        {tab === "health" && <HealthTab analysis={analysis} />}
+        {tab === "ship" && <ShipTab analysis={analysis} />}
+      </div>
+    </AppShell>
   );
 }

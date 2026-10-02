@@ -1,6 +1,20 @@
-backend/.env
-frontend/.env
+# Secrets
 .env
+backend/.env
+frontend/.env.local
+
+# Python
 venv/
-node_modules/
+.venv/
 __pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Node
+node_modules/
+frontend/build/
+
+# Scan output
+*.sarif
+codeguard-report.*
