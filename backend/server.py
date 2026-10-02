@@ -180,7 +180,7 @@ async def _baseline(user_id: str, name: str, source_url: Optional[str], analysis
     query = {"user_id": user_id, "status": "completed", "analysis_id": {"$ne": analysis_id}}
     query.update({"source_url": source_url} if source_url else {"name": name})
     cur = db.analyses.find(query, {"_id": 0, "analysis_id": 1, "overall_score": 1, "security_issues.fingerprint": 1,
-                                   "created_at": 1}).sort("created_at", -1).limit(1)
+                                   "suppressed_issues.fingerprint": 1, "created_at": 1}).sort("created_at", -1).limit(1)
     docs = await cur.to_list(1)
     return docs[0] if docs else None
 
@@ -211,15 +211,20 @@ async def run_pipeline(analysis_id: str, user_id: str, name: str, source_url: Op
         baseline = None
         issues = [f.model_dump() for f in report.security_issues]
         if prev:
-            old = {i.get("fingerprint") for i in prev.get("security_issues", []) if i.get("fingerprint")}
+            fps = lambda key: {i.get("fingerprint") for i in prev.get(key) or [] if i.get("fingerprint")}  # noqa: E731
+            old, old_suppressed = fps("security_issues"), fps("suppressed_issues")
             new_fps = {i["fingerprint"] for i in issues}
+            # A finding silenced by a codeguard-ignore marker is not "fixed", and one that was merely
+            # un-suppressed is not "new": only real code changes move these numbers.
+            suppressed_fps = {f.fingerprint for f in report.suppressed_issues}
             for i in issues:
-                i["is_new"] = bool(old) and i["fingerprint"] not in old
+                i["is_new"] = bool(old) and i["fingerprint"] not in old | old_suppressed
             baseline = {
                 "analysis_id": prev["analysis_id"], "created_at": prev.get("created_at"),
                 "score_delta": round(report.overall_score - (prev.get("overall_score") or 0), 1),
                 "new": sum(1 for i in issues if i.get("is_new")),
-                "fixed": len(old - new_fps) if old else 0,
+                "fixed": len(old - new_fps - suppressed_fps) if old else 0,
+                "suppressed": len(old & suppressed_fps),
             }
 
         await db.analyses.update_one({"analysis_id": analysis_id}, {"$set": {
@@ -237,7 +242,9 @@ async def run_pipeline(analysis_id: str, user_id: str, name: str, source_url: Op
             "scanner_counts": report.scanner_counts,
             "scanners_run": report.scanners_run,
             "suppressed": report.suppressed,
+            "suppressed_issues": [f.model_dump() for f in report.suppressed_issues],
             "scan_errors": report.errors,
+            "scan_warnings": report.warnings,
             "duration_ms": report.duration_ms,
             "repo_meta": repo_meta,
             "baseline": baseline,
@@ -292,7 +299,7 @@ async def analyze_upload(background: BackgroundTasks, file: UploadFile = File(..
     return {"analysis_id": analysis_id, "status": "processing"}
 
 
-LIST_PROJECTION = {"_id": 0, "ai_refactors": 0, "ai_fixes": 0, "dependencies": 0, "bug_risks": 0}
+LIST_PROJECTION = {"_id": 0, "ai_refactors": 0, "ai_fixes": 0, "dependencies": 0, "bug_risks": 0, "suppressed_issues": 0}
 
 
 def _counts(doc: dict) -> dict:
@@ -323,7 +330,7 @@ async def dashboard_stats(user: User = Depends(get_current_user)):
     docs = await db.analyses.find(
         {"user_id": user.user_id},
         {"_id": 0, "ai_refactors": 0, "ai_fixes": 0, "bug_risks": 0, "security_issues.description": 0,
-         "security_issues.recommendation": 0, "security_issues.snippet": 0},
+         "security_issues.recommendation": 0, "security_issues.snippet": 0, "suppressed_issues": 0},
     ).sort("created_at", -1).to_list(500)
     return build_dashboard(docs)
 
@@ -436,9 +443,11 @@ def _slug(name: str) -> str:
 @analysis_router.get("/{analysis_id}/sarif")
 async def export_sarif(analysis_id: str, user: User = Depends(get_current_user)):
     doc = await _get_owned(analysis_id, user)
-    findings = [Finding(**{"rule_id": "LEGACY", "scanner": "patterns", **i}).with_fingerprint()
-                if not i.get("rule_id") else Finding(**i) for i in doc.get("security_issues", [])]
-    return _download(to_sarif(findings), f"codeguard-{_slug(doc['name'])}.sarif", "application/sarif+json")
+    def load(items):
+        return [Finding(**{"rule_id": "LEGACY", "scanner": "patterns", **i}).with_fingerprint()
+                if not i.get("rule_id") else Finding(**i) for i in items or []]
+    sarif = to_sarif(load(doc.get("security_issues")), load(doc.get("suppressed_issues")))
+    return _download(sarif, f"codeguard-{_slug(doc['name'])}.sarif", "application/sarif+json")
 
 
 @analysis_router.get("/{analysis_id}/sbom")

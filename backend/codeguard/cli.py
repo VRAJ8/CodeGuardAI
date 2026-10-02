@@ -26,13 +26,17 @@ def _table(report, use_color: bool) -> str:
            f"grade {c(BOLD)}{report.grade}{c(RESET)}  score {report.overall_score}/100  "
            f"{report.metrics.total_files} files · {report.metrics.total_lines:,} lines · {report.duration_ms} ms",
            f"{c(DIM)}scanners: {', '.join(report.scanners_run)}{c(RESET)}"]
-    out += [f"{c(COLORS['high'])}error: {e}{c(RESET)}" for e in report.errors] + [""]
+    out += [f"{c(COLORS['high'])}error: {e}{c(RESET)}" for e in report.errors]
+    out += [f"{c(COLORS['medium'])}warning: {w}{c(RESET)}" for w in report.warnings] + [""]
     for f in report.security_issues:
         loc = f"{f.file_path}:{f.line_number}" if f.line_number else f.file_path
         out.append(f"  {c(COLORS[f.severity])}{f.severity.upper():<8}{c(RESET)} {f.type}")
         out.append(f"           {c(DIM)}{loc}  [{f.rule_id}{' · ' + f.cwe if f.cwe else ''}]{c(RESET)}")
     counts = " ".join(f"{s}={report.severity_counts[s]}" for s in SEVERITIES)
-    suppressed = f", {report.suppressed} suppressed inline" if report.suppressed else ""
+    for f in report.suppressed_issues:
+        why = f" -- {f.suppression.justification}" if f.suppression and f.suppression.justification else ""
+        out.append(f"  {c(DIM)}SUPPRESSED {f.type}  {f.file_path}:{f.line_number}  [{f.rule_id}]{why}{c(RESET)}")
+    suppressed = f", {report.suppressed} suppressed inline (listed above, not counted)" if report.suppressed else ""
     out += ["", f"{len(report.security_issues)} findings ({counts}){suppressed}"]
     return "\n".join(out)
 
@@ -66,7 +70,7 @@ def main(argv=None) -> int:
     elif args.format == "json":
         text = report.model_dump_json(indent=2)
     elif args.format == "sarif":
-        text = json.dumps(to_sarif(report.security_issues), indent=2)
+        text = json.dumps(to_sarif(report.security_issues, report.suppressed_issues), indent=2)
     else:
         text = json.dumps(to_cyclonedx(report.dependencies, root.resolve().name), indent=2)
 

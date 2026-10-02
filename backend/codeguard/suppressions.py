@@ -2,54 +2,99 @@
 
     risky_call()  # codeguard-ignore
     risky_call()  # codeguard-ignore: CG-EVAL, BANDIT-B307
-    // codeguard-ignore-next-line: CG-SQLI-CONCAT -- reason
+    // codeguard-ignore-next-line: CG-SQLI-CONCAT -- reviewed, demo string only
     {/* codeguard-ignore-next-line */}
 
-A marker with no rule list silences every finding on that line; with a list, only those
-rule ids. Suppressed findings are counted in the report so they are never invisible.
+Design rules (a suppression mechanism in a security tool must fail closed):
+- A marker counts only directly after a comment leader (#, //, /*, <!--, --), outside string
+  literals, and as a whole word: `codeguard-ignored`, `nocodeguard-ignore`, or a marker inside
+  "a string" are not markers.
+- Anything malformed after the marker is rejected and reported as a warning, never widened into a
+  suppress-all. A bare marker suppresses the whole line; a rule list scopes it (case-insensitive).
+- Suppressed findings are kept, not deleted: they carry a `suppression` record, stay out of the
+  score / severity counts / --fail-on, and are exported as SARIF results with `suppressions`.
 """
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
-from .models import Finding, SourceFile
+from .models import Finding, SourceFile, Suppression
 
-# Rule ids are upper-case tokens like CG-EVAL, BANDIT-B307, SEMGREP-flask-ssti, OSV-GHSA-...
-MARKER = re.compile(r"codeguard-ignore(?P<next>-next-line)?(?:\s*:\s*(?P<rules>[A-Za-z0-9_.\-]+(?:\s*,\s*[A-Za-z0-9_.\-]+)*))?")
+TOKEN = re.compile(r"codeguard-ignore(?P<next>-next-line)?(?![\w-])")
+LEADERS = ("#", "//", "/*", "<!--", "--")
+RULE = r"[A-Za-z][A-Za-z0-9_.\-]*[A-Za-z0-9]"
+# What may follow the marker: optional ": RULE, RULE", optional "-- justification", optional comment closer.
+TAIL = re.compile(
+    rf"^(?:\s*:\s*(?P<rules>{RULE}(?:\s*,\s*{RULE})*))?"
+    r"(?:\s+--\s*(?P<why>.*?))?"
+    r"\s*(?:\*/\s*\}?|-->)?\s*$"
+)
 ALL = "*"
 
 
-def _rules(match: re.Match) -> Set[str]:
-    raw = match.group("rules")
-    return {r.strip() for r in raw.split(",")} if raw else {ALL}
+@dataclass
+class Directive:
+    rules: Set[str]
+    marker_line: int
+    justification: str = ""
 
 
-def directives(content: str) -> Dict[int, Set[str]]:
-    """Map of 1-based line number -> rule ids suppressed on that line."""
-    out: Dict[int, Set[str]] = {}
+@dataclass
+class ParseResult:
+    by_line: Dict[int, List[Directive]] = field(default_factory=dict)
+    warnings: List[str] = field(default_factory=list)
+
+
+def _in_string(prefix: str) -> bool:
+    """Heuristic: an odd number of unescaped quotes before the comment leader means we're in a literal."""
+    unescaped = re.sub(r"\\.", "", prefix)
+    return any(unescaped.count(q) % 2 for q in ('"', "'", "`"))
+
+
+def parse(content: str, path: str = "") -> ParseResult:
+    out = ParseResult()
+    if "codeguard-ignore" not in content:
+        return out
     for lineno, line in enumerate(content.split("\n"), 1):
-        for m in MARKER.finditer(line):
+        line = line.rstrip("\r")
+        for m in TOKEN.finditer(line):
+            before = line[: m.start()].rstrip()
+            leader = next((ld for ld in LEADERS if before.endswith(ld)), None)
+            if leader is None or _in_string(before[: -len(leader)]):
+                continue  # not a comment marker (string content, prose, URL, lookalike word)
+            tail = TAIL.match(line[m.end():])
+            if not tail:
+                out.warnings.append(f"{path}:{lineno}: malformed codeguard-ignore marker ignored "
+                                    f"(expected 'codeguard-ignore[-next-line][: RULE, ...] [-- reason]')")
+                continue
+            rules = {r.strip().upper() for r in tail.group("rules").split(",")} if tail.group("rules") else {ALL}
             target = lineno + 1 if m.group("next") else lineno
-            out.setdefault(target, set()).update(_rules(m))
+            out.by_line.setdefault(target, []).append(
+                Directive(rules=rules, marker_line=lineno, justification=(tail.group("why") or "").strip()))
     return out
 
 
-def apply(findings: List[Finding], files: List[SourceFile]) -> Tuple[List[Finding], int]:
-    """Drop suppressed findings. Returns (kept, suppressed_count)."""
-    cache: Dict[str, Optional[Dict[int, Set[str]]]] = {}
+def apply(findings: List[Finding], files: List[SourceFile]) -> Tuple[List[Finding], List[Finding], List[str]]:
+    """Split findings into (active, suppressed). Suppressed ones get a `suppression` record."""
     by_path = {f.path: f for f in files}
-    kept, suppressed = [], 0
+    parsed: Dict[str, ParseResult] = {}
+    warnings: List[str] = []
+    for f in files:
+        if "codeguard-ignore" in f.content:
+            parsed[f.path] = parse(f.content, f.path)
+            warnings += parsed[f.path].warnings
+    active, suppressed = [], []
     for f in findings:
-        if f.line_number is None:
-            kept.append(f)
-            continue
-        if f.file_path not in cache:
-            src = by_path.get(f.file_path)
-            cache[f.file_path] = directives(src.content) if src and "codeguard-ignore" in src.content else None
-        rules = (cache[f.file_path] or {}).get(f.line_number)
-        if rules and (ALL in rules or f.rule_id in rules):
-            suppressed += 1
+        directives = parsed.get(f.file_path)
+        hit: Optional[Directive] = None
+        if directives and f.line_number is not None and f.file_path in by_path:
+            hit = next((d for d in directives.by_line.get(f.line_number, [])
+                        if ALL in d.rules or f.rule_id.upper() in d.rules), None)
+        if hit:
+            suppressed.append(f.model_copy(update={"suppression": Suppression(
+                justification=hit.justification, marker_line=hit.marker_line)}))
         else:
-            kept.append(f)
-    return kept, suppressed
+            active.append(f)
+    return active, suppressed, warnings

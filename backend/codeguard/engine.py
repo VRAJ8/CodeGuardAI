@@ -37,6 +37,15 @@ def dedupe(findings: List[Finding]) -> List[Finding]:
     return sorted(best.values(), key=lambda f: (-SEV_RANK[f.severity], f.file_path, f.line_number or 0))
 
 
+def _disambiguate_fingerprints(findings: List[Finding]) -> None:
+    """Identical code lines in one file share a content fingerprint; suffix repeats in line order."""
+    seen: Counter = Counter()
+    for f in sorted(findings, key=lambda f: (f.file_path, f.line_number or 0, f.rule_id)):
+        seen[f.fingerprint] += 1
+        if seen[f.fingerprint] > 1:
+            f.fingerprint = f"{f.fingerprint}-{seen[f.fingerprint]}"
+
+
 async def scan(
     files: List[SourceFile],
     progress: Optional[ProgressFn] = None,
@@ -81,7 +90,10 @@ async def scan(
     all_health: List[BugRisk] = [analyze_file(f.content, f.path, f.language) for f in code_files]
     risks = sorted((r for r in all_health if r.risk_score > 0), key=lambda r: -r.risk_score)
 
-    findings, suppressed = apply_suppressions(dedupe(findings), files)
+    # Suppress before dedupe, so a rule-scoped marker means the same thing whichever engines are installed.
+    active, suppressed_raw, warnings = apply_suppressions(findings, files)
+    findings, suppressed = dedupe(active), dedupe(suppressed_raw)
+    _disambiguate_fingerprints(findings + suppressed)
     languages = Counter()
     for f in code_files:
         languages[f.language] += f.lines
@@ -106,7 +118,9 @@ async def scan(
         owasp_counts=dict(Counter(f.owasp for f in findings if f.owasp).most_common()),
         scanner_counts=dict(Counter(f.scanner for f in findings).most_common()),
         scanners_run=scanners_run,
-        suppressed=suppressed,
+        suppressed=len(suppressed),
+        suppressed_issues=suppressed,
         errors=errors,
+        warnings=warnings,
         duration_ms=int((time.monotonic() - started) * 1000),
     )

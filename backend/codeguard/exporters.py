@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from . import __version__
 from .models import Dependency, Finding
@@ -13,10 +13,11 @@ SARIF_LEVEL = {"critical": "error", "high": "error", "medium": "warning", "low":
 SECURITY_SEVERITY = {"critical": "9.5", "high": "7.5", "medium": "5.0", "low": "2.0"}
 
 
-def to_sarif(findings: List[Finding]) -> dict:
+def to_sarif(findings: List[Finding], suppressed: Optional[List[Finding]] = None) -> dict:
+    """Active findings become results; suppressed ones are emitted too, carrying SARIF `suppressions`."""
     rules: Dict[str, dict] = {}
     results = []
-    for f in findings:
+    for f in list(findings) + list(suppressed or []):
         if f.rule_id not in rules:
             tags = ["security", f.scanner]
             if f.cwe:
@@ -43,6 +44,11 @@ def to_sarif(findings: List[Finding]) -> dict:
             "partialFingerprints": {"codeguard/v1": f.fingerprint},
             "properties": {"severity": f.severity, "cwe": f.cwe, "owasp": f.owasp},
         })
+        if f.suppression:
+            results[-1]["suppressions"] = [{
+                "kind": "inSource", "status": "accepted",
+                "justification": f.suppression.justification or "codeguard-ignore marker",
+            }]
     return {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",

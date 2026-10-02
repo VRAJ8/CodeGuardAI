@@ -70,7 +70,8 @@ def bandit_available() -> bool:
 
 
 def semgrep_available() -> bool:
-    return shutil.which("semgrep") is not None and os.environ.get("CODEGUARD_DISABLE_SEMGREP") != "1"
+    exe = os.environ.get("CODEGUARD_SEMGREP") or shutil.which("semgrep")
+    return bool(exe) and os.path.isfile(exe) and os.environ.get("CODEGUARD_DISABLE_SEMGREP") != "1"
 
 
 def _original(mapping: Dict[str, str], tmp: str, filename: str) -> str:
@@ -125,7 +126,9 @@ SEMGREP_SEVERITY = {"ERROR": "high", "WARNING": "medium", "INFO": "low"}
 
 def run_semgrep(files: List[SourceFile], timeout: int = 120) -> List[Finding]:
     code = [f for f in files if f.language not in {"json", "config", "unknown"}]
-    exe = shutil.which("semgrep")  # absolute path: never rely on a bare name at exec time
+    # Resolved from PATH (pipx installs it there). That is not a defence against a hostile PATH;
+    # set CODEGUARD_SEMGREP to an absolute path to pin a trusted binary.
+    exe = os.environ.get("CODEGUARD_SEMGREP") or shutil.which("semgrep")
     if not code or not exe or not RULES_DIR.exists():
         return []
     tmp, mapping = materialize(code)

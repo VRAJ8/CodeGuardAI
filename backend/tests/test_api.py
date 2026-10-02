@@ -102,6 +102,19 @@ def test_rescan_tracks_new_and_fixed_findings(api):
     assert [i["file_path"] for i in doc["security_issues"] if i.get("is_new")] == ["extra.js"]
 
 
+def test_suppressing_a_finding_is_not_counted_as_fixed(api):
+    login(api)
+    upload(api, fixture_zip({"extra.js": "el.innerHTML = location.hash;\n"}))
+    aid = upload(api, fixture_zip({"extra.js": "el.innerHTML = location.hash;  // codeguard-ignore -- trusted\n"}))
+    doc = api.get(f"/api/analysis/{aid}").json()
+    assert doc["baseline"]["fixed"] == 0 and doc["baseline"]["suppressed"] == 1
+    assert [i["file_path"] for i in doc["suppressed_issues"]] == ["extra.js"]
+    assert doc["suppressed_issues"][0]["suppression"]["justification"] == "trusted"
+    sarif = api.get(f"/api/analysis/{aid}/sarif").json()
+    assert any(r.get("suppressions") for r in sarif["runs"][0]["results"])
+    assert "suppressed_issues" not in api.get("/api/analysis/list").json()[0]
+
+
 def test_dashboard_aggregates(api):
     login(api)
     upload(api, fixture_zip())

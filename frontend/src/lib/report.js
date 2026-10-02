@@ -59,6 +59,12 @@ export function exportPdf(analysis) {
     theme: "grid", styles: { fontSize: 9, halign: "center" }, headStyles: { fillColor: [24, 24, 27] },
   });
   y = doc.lastAutoTable.finalY + 8;
+  if (analysis.suppressed > 0) {
+    doc.setFontSize(8.5);
+    doc.setTextColor(110, 110, 110);
+    doc.text(`${analysis.suppressed} finding(s) suppressed in source by codeguard-ignore markers (excluded from the totals above).`, 14, y - 3);
+    y += 4;
+  }
 
   if (analysis.recommendations?.length) {
     doc.setFont("helvetica", "bold");

@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 SEVERITIES = ["critical", "high", "medium", "low"]
+_SUPPRESSION_TAIL = re.compile(r"\s*(?:#|//|/\*|<!--|--|\{/\*)\s*codeguard-ignore.*$")
 SEVERITY_RANK = {s: i for i, s in enumerate(reversed(SEVERITIES))}  # low=0 ... critical=3
 
 
@@ -15,6 +17,14 @@ class SourceFile(BaseModel):
     content: str
     language: str
     lines: int
+
+
+class Suppression(BaseModel):
+    """An in-source suppression (codeguard-ignore). Mirrors SARIF 2.1.0's suppression object."""
+
+    kind: str = "inSource"
+    justification: str = ""
+    marker_line: Optional[int] = None
 
 
 class Finding(BaseModel):
@@ -32,9 +42,14 @@ class Finding(BaseModel):
     owasp: Optional[str] = None  # e.g. "A07:2021"
     snippet: Optional[str] = None
     fingerprint: str = ""
+    suppression: Optional[Suppression] = None
 
     def with_fingerprint(self) -> "Finding":
-        raw = f"{self.rule_id}|{self.file_path}|{self.line_number}|{self.snippet or ''}"
+        """Stable identity across re-scans: rule + file + normalized code, not the line number, so code
+        moving up/down or gaining a trailing comment (e.g. a codeguard-ignore marker) keeps its identity.
+        The engine appends an occurrence index when identical lines repeat within a file."""
+        code = " ".join(_SUPPRESSION_TAIL.sub("", self.snippet or "").split())
+        raw = f"{self.rule_id}|{self.file_path}|{code or f'line:{self.line_number}'}"
         self.fingerprint = hashlib.sha1(raw.encode(), usedforsecurity=False).hexdigest()[:16]
         return self
 
@@ -104,6 +119,8 @@ class ScanReport(BaseModel):
     owasp_counts: Dict[str, int]
     scanner_counts: Dict[str, int]
     scanners_run: List[str] = Field(default_factory=list)
-    suppressed: int = 0  # findings silenced by codeguard-ignore comments
-    errors: List[str] = Field(default_factory=list)  # requested engines that failed to run
+    suppressed: int = 0  # len(suppressed_issues), kept for API compatibility
+    suppressed_issues: List[Finding] = Field(default_factory=list)  # excluded from score/counts/gating, still reported
+    errors: List[str] = Field(default_factory=list)  # requested engines that failed to run (fails a --fail-on gate)
+    warnings: List[str] = Field(default_factory=list)  # e.g. malformed suppression markers that were ignored
     duration_ms: int = 0

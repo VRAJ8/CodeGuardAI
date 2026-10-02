@@ -79,6 +79,7 @@ function FindingRow({ issue, fix, open, onToggle }) {
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-bold">{issue.type}</span>
             {issue.is_new && <span className="sticker !h-5 !px-1.5 !text-[10px] bg-yel rotate-3">NEW</span>}
+            {issue.suppression && <span className="sticker !h-5 !px-1.5 !text-[10px] bg-cream">SUPPRESSED</span>}
             {fix && <span className="sticker !h-5 !px-1.5 !text-[10px] bg-lilac -rotate-2"><Sparkles className="w-2.5 h-2.5" strokeWidth={3} /> AI patch</span>}
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-sub">
@@ -92,6 +93,14 @@ function FindingRow({ issue, fix, open, onToggle }) {
       </button>
       {open && (
         <div className="px-4 pb-5 md:pl-[112px] space-y-4">
+          {issue.suppression && (
+            <div className="p-3 rounded-[10px] border-2 border-dashed border-ink bg-cream text-[13px] font-semibold">
+              Suppressed in source by a <code className="font-mono">codeguard-ignore</code> marker
+              {issue.suppression.marker_line ? ` on line ${issue.suppression.marker_line}` : ""}
+              {issue.suppression.justification ? `: "${issue.suppression.justification}"` : " (no justification given)"}.
+              Not counted in the score or severity totals.
+            </div>
+          )}
           {!(issue.snippet && issue.description?.startsWith("Found:")) && <p className="text-[15px] text-sub">{issue.description}</p>}
           {issue.snippet && issue.scanner !== "secrets" && <pre className="code-block">{issue.snippet}</pre>}
           <div className="flex gap-2.5 p-3.5 rounded-[10px] border-2 border-ink bg-mint/50 text-[15px]">
@@ -123,8 +132,10 @@ function FindingRow({ issue, fix, open, onToggle }) {
 }
 
 function FindingsTab({ analysis }) {
-  const issues = analysis.security_issues || [];
-  const counts = severityCounts(analysis);
+  const suppressedIssues = analysis.suppressed_issues || [];
+  const [showSuppressed, setShowSuppressed] = useState(false);
+  const issues = showSuppressed ? suppressedIssues : analysis.security_issues || [];
+  const counts = severityCounts(showSuppressed ? { security_issues: suppressedIssues } : analysis);
   const [sev, setSev] = useState(null);
   const [scanner, setScanner] = useState(null);
   const [onlyNew, setOnlyNew] = useState(false);
@@ -140,7 +151,7 @@ function FindingsTab({ analysis }) {
     (!sev || i.severity === sev) && (!scanner || i.scanner === scanner) && (!onlyNew || i.is_new) &&
     (!q || `${i.type} ${i.file_path} ${i.cwe || ""} ${i.description}`.toLowerCase().includes(q.toLowerCase())));
 
-  if (!issues.length) {
+  if (!issues.length && !suppressedIssues.length) {
     return <EmptyState icon={CheckCircle2} title="Zero findings. Clean." body="Every engine came back empty. Go touch grass. 🌱" />;
   }
 
@@ -160,15 +171,21 @@ function FindingsTab({ analysis }) {
           {scanners.length > 1 && scanners.map((s) => (
             <button key={s} className={`chip ${scanner === s ? "chip-active" : ""}`} onClick={() => setScanner(scanner === s ? null : s)}>{SCANNERS[s]?.label || s}</button>
           ))}
-          {analysis.baseline?.new > 0 && (
+          {analysis.baseline?.new > 0 && !showSuppressed && (
             <button className={`chip ${onlyNew ? "chip-active" : "!bg-yel"}`} onClick={() => setOnlyNew(!onlyNew)}>New only {analysis.baseline.new}</button>
+          )}
+          {suppressedIssues.length > 0 && (
+            <button className={`chip ${showSuppressed ? "chip-active" : "border-dashed"}`}
+                    onClick={() => { setShowSuppressed(!showSuppressed); setSev(null); setScanner(null); setOnlyNew(false); }}>
+              {showSuppressed ? "← Active findings" : `Suppressed ${suppressedIssues.length}`}
+            </button>
           )}
         </div>
       </div>
       {shown.length ? shown.map((issue, i) => {
         const key = issue.fingerprint || `${issue.file_path}-${issue.line_number}-${i}`;
         return <FindingRow key={key} issue={issue} fix={findFix(issue)} open={!!open[key]} onToggle={() => setOpen((o) => ({ ...o, [key]: !o[key] }))} />;
-      }) : <div className="p-10 text-center text-sub">No findings match those filters.</div>}
+      }) : <div className="p-10 text-center text-sub">{issues.length ? "No findings match those filters." : "No active findings. Only suppressed ones remain."}</div>}
     </div>
   );
 }
@@ -578,6 +595,12 @@ export default function AnalysisDetail() {
             {analysis.scan_errors.map((e) => <div key={e}>⚠️ {e}. Results may be incomplete; re-scan to retry.</div>)}
           </div>
         )}
+        {analysis.scan_warnings?.length > 0 && (
+          <div className="mt-3 p-3 rounded-[10px] border-2 border-dashed border-ink bg-cream text-[13px] font-mono">
+            {analysis.scan_warnings.slice(0, 5).map((w) => <div key={w}>{w}</div>)}
+            {analysis.scan_warnings.length > 5 && <div>+{analysis.scan_warnings.length - 5} more</div>}
+          </div>
+        )}
         {analysis.scanners_run && (
           <div className="mt-6 pt-5 border-t-2 border-ink flex flex-wrap items-center gap-2">
             <span className="eyebrow mr-1">Engines</span>
@@ -587,6 +610,11 @@ export default function AnalysisDetail() {
                 {analysis.scanner_counts?.[s] ? <span className="font-mono text-sub">{analysis.scanner_counts[s]}</span> : null}
               </span>
             ))}
+            {analysis.suppressed > 0 && (
+              <span className="chip border-dashed" title="Findings silenced by codeguard-ignore markers in the scanned code. See Findings → Suppressed.">
+                {analysis.suppressed} suppressed inline
+              </span>
+            )}
           </div>
         )}
       </section>
