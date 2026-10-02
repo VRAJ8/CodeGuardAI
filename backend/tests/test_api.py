@@ -115,6 +115,102 @@ def test_suppressing_a_finding_is_not_counted_as_fixed(api):
     assert "suppressed_issues" not in api.get("/api/analysis/list").json()[0]
 
 
+def _upload_files(api, files: dict):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, content in files.items():
+            zf.writestr(f"proj/{name}", content)
+    return api.get(f"/api/analysis/{upload(api, buf.getvalue(), 'proj.zip')}").json()
+
+
+def test_rotated_credential_is_new_and_old_one_fixed(api):
+    login(api)
+    _upload_files(api, {"cfg.py": 'db_password = "Xk9mQ2pL"\n\n\n'})
+    doc = _upload_files(api, {"cfg.py": '\n\n\napi_secret = "Zr7wT4nB"\n'})
+    assert doc["baseline"]["new"] == 1 and doc["baseline"]["fixed"] == 1
+    assert [i["line_number"] for i in doc["security_issues"] if i.get("is_new")] == [4]
+
+
+def test_new_finding_after_a_scan_with_only_suppressed_findings_is_new(api):
+    login(api)
+    _upload_files(api, {"a.js": "el.innerHTML = location.hash;  // codeguard-ignore -- trusted\n"})
+    doc = _upload_files(api, {"a.js": "el.innerHTML = location.hash;  // codeguard-ignore -- trusted\neval(location.hash);\n"})
+    assert doc["baseline"]["comparable"] is True
+    assert [i["rule_id"] for i in doc["security_issues"] if i.get("is_new")] == ["CG-EVAL"]
+
+
+def test_bandit_marker_is_not_counted_as_fixed(api):
+    login(api)
+    body = "import pickle\n\n\ndef load(blob):\n    return pickle.loads(blob)\n"
+    _upload_files(api, {"m.py": body})
+    doc = _upload_files(api, {"m.py": "# header\n" + body.replace("loads(blob)", "loads(blob)  # codeguard-ignore -- trusted")})
+    assert doc["baseline"]["fixed"] == 0 and doc["baseline"]["new"] == 0 and doc["baseline"]["suppressed"] == 1
+
+
+V2_ISSUES = [
+    {"severity": "critical", "type": "Hardcoded Secret Detection", "description": "Potential AWS_KEY found", "file_path": "a.py",
+     "line_number": None, "recommendation": "rotate"},
+    {"severity": "critical", "type": "Hardcoded Secret Detection", "description": "Potential GENERIC_SECRET found",
+     "file_path": "a.py", "line_number": None, "recommendation": "rotate"},
+    {"severity": "high", "type": "Vulnerable Dependency (CVE-2021-23337)", "description": "lodash", "file_path": "package.json",
+     "line_number": None, "recommendation": "upgrade"},
+    {"severity": "low", "type": "Code annotation found", "description": "Found: # TODO", "file_path": "b.py", "line_number": 3,
+     "recommendation": "address"},
+]
+
+
+def _insert_v2(api, user_id, **extra):
+    from datetime import datetime, timedelta, timezone
+    doc = {"analysis_id": extra.pop("analysis_id", "analysis_v2doc"), "user_id": user_id, "name": "acme/legacy",
+           "source_type": "github", "source_url": "https://github.com/acme/legacy", "status": "completed",
+           "created_at": (datetime.now(timezone.utc) - timedelta(days=3)).isoformat(), "overall_score": 12.0,
+           "metrics": {"total_files": 3, "total_lines": 100, "languages": {"python": 100}}, "security_issues": V2_ISSUES,
+           "bug_risks": [], "ai_summary": "", "recommendations": [], "ai_fixes": [], "ai_refactors": [], **extra}
+    api.portal.call(server.db.analyses.insert_one, doc)
+    return doc["analysis_id"]
+
+
+def test_stale_processing_scans_expire_instead_of_locking_the_user_out(api):
+    from datetime import datetime, timedelta, timezone
+    user = login(api)
+    old = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+    for n in range(3):
+        _insert_v2(api, user["user_id"], analysis_id=f"analysis_stuck{n}", status="processing", created_at=old)
+    fresh = _insert_v2(api, user["user_id"], analysis_id="analysis_fresh", status="processing",
+                       created_at=datetime.now(timezone.utc).isoformat())
+    assert api.get("/api/analysis/stats/dashboard").json()["running"] == 1  # only the fresh one
+    stuck = api.get("/api/analysis/analysis_stuck0").json()
+    assert stuck["status"] == "failed" and "interrupted" in stuck["error"]
+    assert api.get(f"/api/analysis/{fresh}").json()["status"] == "processing"
+    assert api.post("/api/analysis/upload", files={"file": ("x.zip", fixture_zip(), "application/zip")}).status_code == 202
+
+
+def test_v2_documents_render_correctly_through_the_v3_api(api):
+    user = login(api)
+    aid = _insert_v2(api, user["user_id"])
+    stats = api.get("/api/analysis/stats/dashboard").json()
+    assert stats["secrets"] == 2 and stats["vulnerable_dependencies"] == 1
+    assert stats["scanners"] == {"secrets": 2, "osv": 1, "patterns": 1}
+
+    sarif = api.get(f"/api/analysis/{aid}/sarif").json()["runs"][0]
+    rules = {r["id"]: r for r in sarif["tool"]["driver"]["rules"]}
+    assert "LEGACY-Code-annotation-found" in rules and rules["LEGACY-Code-annotation-found"]["defaultConfiguration"]["level"] == "note"
+    fps = [r["partialFingerprints"]["codeguard/v2"] for r in sarif["results"]]
+    assert len(fps) == len(set(fps)) == 4
+
+    sbom = api.get(f"/api/analysis/{aid}/sbom")
+    assert sbom.status_code == 409 and "predates" in sbom.json()["detail"]
+
+
+def test_no_score_delta_against_a_v2_scan(api):
+    user = login(api)
+    _insert_v2(api, user["user_id"], name="vulnerable_app", source_url=None, source_type="zip")
+    aid = upload(api, fixture_zip(), "vulnerable_app.zip")
+    baseline = api.get(f"/api/analysis/{aid}").json()["baseline"]
+    assert baseline["score_delta"] is None and baseline["comparable"] is False
+    assert baseline["new"] == 0 and baseline["fixed"] == 0
+
+
 def test_dashboard_aggregates(api):
     login(api)
     upload(api, fixture_zip())

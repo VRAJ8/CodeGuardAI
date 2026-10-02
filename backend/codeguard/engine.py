@@ -37,7 +37,24 @@ def dedupe(findings: List[Finding]) -> List[Finding]:
     return sorted(best.values(), key=lambda f: (-SEV_RANK[f.severity], f.file_path, f.line_number or 0))
 
 
-def _disambiguate_fingerprints(findings: List[Finding]) -> None:
+def _normalize_newlines(f: SourceFile) -> SourceFile:
+    if "\r" not in f.content:
+        return f
+    content = f.content.replace("\r\n", "\n").replace("\r", "\n")
+    return f.model_copy(update={"content": content, "lines": content.count("\n") + 1})
+
+
+def _fingerprint_from_source(findings: List[Finding], files: List[SourceFile]) -> None:
+    """Fingerprint every finding from the flagged source line itself, then disambiguate repeats."""
+    lines_by_path = {f.path: f.content.split("\n") for f in files}
+    for f in findings:
+        lines = lines_by_path.get(f.file_path)
+        line = lines[f.line_number - 1] if lines and f.line_number and 0 < f.line_number <= len(lines) else None
+        f.with_fingerprint(source_line=line)
+    disambiguate_fingerprints(findings)
+
+
+def disambiguate_fingerprints(findings: List[Finding]) -> None:
     """Identical code lines in one file share a content fingerprint; suffix repeats in line order."""
     seen: Counter = Counter()
     for f in sorted(findings, key=lambda f: (f.file_path, f.line_number or 0, f.rule_id)):
@@ -55,16 +72,25 @@ async def scan(
 ) -> ScanReport:
     progress = progress or _noop
     started = time.monotonic()
+    # One line-ending convention for every engine (CPython/Bandit treat a lone CR as a line break, the regex
+    # scanners split on LF), so a finding, its marker and its fingerprint always agree on line numbers.
+    files = [_normalize_newlines(f) for f in files]
     scanners_run = ["patterns", "secrets", "radon"]
     errors: List[str] = []  # engines that were requested but could not run
     use_bandit = use_bandit and bandit_available()
     use_semgrep = use_semgrep and semgrep_available()
 
     await progress("Running secret & pattern rules", 20)
-    findings: List[Finding] = []
-    for f in files:
-        findings += scan_secrets(f.content, f.path)
-        findings += scan_patterns(f.content, f.path, f.language, skip_bandit_overlap=use_bandit)
+
+    def _regex_pass() -> List[Finding]:
+        out: List[Finding] = []
+        for f in files:
+            out += scan_secrets(f.content, f.path)
+            out += scan_patterns(f.content, f.path, f.language, skip_bandit_overlap=use_bandit)
+        return out
+
+    # CPU-bound work runs in a worker thread so a large repo can't stall the API's event loop.
+    findings: List[Finding] = await asyncio.to_thread(_regex_pass)
 
     await progress("Running SAST engines (Bandit, Semgrep)", 35)
     jobs = []
@@ -87,13 +113,14 @@ async def scan(
 
     await progress("Measuring complexity & maintainability", 70)
     code_files = list(iter_code(files))
-    all_health: List[BugRisk] = [analyze_file(f.content, f.path, f.language) for f in code_files]
+    all_health: List[BugRisk] = await asyncio.to_thread(
+        lambda: [analyze_file(f.content, f.path, f.language) for f in code_files])
     risks = sorted((r for r in all_health if r.risk_score > 0), key=lambda r: -r.risk_score)
 
     # Suppress before dedupe, so a rule-scoped marker means the same thing whichever engines are installed.
-    active, suppressed_raw, warnings = apply_suppressions(findings, files)
+    active, suppressed_raw, warnings = await asyncio.to_thread(apply_suppressions, findings, files)
     findings, suppressed = dedupe(active), dedupe(suppressed_raw)
-    _disambiguate_fingerprints(findings + suppressed)
+    _fingerprint_from_source(findings + suppressed, files)
     languages = Counter()
     for f in code_files:
         languages[f.language] += f.lines

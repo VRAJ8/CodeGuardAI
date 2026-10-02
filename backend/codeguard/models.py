@@ -43,13 +43,18 @@ class Finding(BaseModel):
     snippet: Optional[str] = None
     fingerprint: str = ""
     suppression: Optional[Suppression] = None
+    # Text the fingerprint is derived from when it must not be the raw source line (secrets: the line with
+    # the credential masked). Never persisted or exported.
+    fp_basis: Optional[str] = Field(default=None, exclude=True)
 
-    def with_fingerprint(self) -> "Finding":
-        """Stable identity across re-scans: rule + file + normalized code, not the line number, so code
-        moving up/down or gaining a trailing comment (e.g. a codeguard-ignore marker) keeps its identity.
-        The engine appends an occurrence index when identical lines repeat within a file."""
-        code = " ".join(_SUPPRESSION_TAIL.sub("", self.snippet or "").split())
-        raw = f"{self.rule_id}|{self.file_path}|{code or f'line:{self.line_number}'}"
+    def with_fingerprint(self, source_line: Optional[str] = None) -> "Finding":
+        """Stable identity across re-scans: rule + file + the normalized flagged source line (not the line
+        number, and not the engine's snippet, whose format varies by engine). Code moving up/down or gaining
+        a trailing codeguard-ignore comment keeps its identity; the engine appends an occurrence index when
+        identical lines repeat within a file. Scanners call this without the source; the engine recomputes it."""
+        basis = self.fp_basis if self.fp_basis is not None else (source_line if source_line is not None else self.snippet)
+        code = " ".join(_SUPPRESSION_TAIL.sub("", basis or "").split())
+        raw = f"v2|{self.rule_id}|{self.file_path}|{code or f'line:{self.line_number}'}"
         self.fingerprint = hashlib.sha1(raw.encode(), usedforsecurity=False).hexdigest()[:16]
         return self
 

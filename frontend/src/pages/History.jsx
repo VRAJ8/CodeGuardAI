@@ -19,13 +19,15 @@ export default function History() {
 
   useEffect(() => {
     let timer;
+    let cancelled = false; // a request still in flight at unmount must not re-arm the poll
     const load = () =>
       axios.get(`${API}/analysis/list`).then((r) => {
+        if (cancelled) return;
         setItems(r.data.map(normalizeAnalysis));
         if (r.data.some((a) => a.status === "processing")) timer = setTimeout(load, 4000);
-      }).catch(() => { toast.error("Couldn't load scans"); setItems([]); });
+      }).catch(() => { if (!cancelled) { toast.error("Couldn't load scans"); setItems([]); } });
     load();
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, []);
 
   const shown = useMemo(() => {

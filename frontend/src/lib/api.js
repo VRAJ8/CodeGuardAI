@@ -32,7 +32,14 @@ export async function downloadFromApi(path, filename) {
   try {
     res = await axios.get(`${API}${path}`, { responseType: "blob" });
   } catch (err) {
-    toast.error(err.response?.status === 404 ? "This export isn't available on this server yet" : "Download failed");
+    const status = err.response?.status;
+    let detail = "";
+    try {
+      detail = JSON.parse(await err.response.data.text()).detail || ""; // blob responses carry the JSON error body
+    } catch {
+      /* not JSON */
+    }
+    toast.error(status === 404 ? "This export isn't available on this server yet" : detail || "Download failed");
     return;
   }
   const url = URL.createObjectURL(res.data);

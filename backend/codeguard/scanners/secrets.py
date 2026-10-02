@@ -68,7 +68,7 @@ def scan_secrets(content: str, file_path: str) -> List[Finding]:
                 continue
             if rid == "SEC-DB-URL" and _looks_placeholder(m.group(4) or ""):
                 continue
-            findings.append(_make(rid, title, sev, file_path, lineno, m.group(0)))
+            findings.append(_make(rid, title, sev, file_path, lineno, m.group(0), line=line))
             seen_lines.add(lineno)
         if lineno in seen_lines:
             continue
@@ -78,11 +78,12 @@ def scan_secrets(content: str, file_path: str) -> List[Finding]:
             if _looks_placeholder(value) or shannon_entropy(value) < 3.0:
                 continue
             findings.append(_make("SEC-GENERIC", f"Hardcoded credential in `{m.group(1)[:40]}`", "high",
-                                  file_path, lineno, value, entropy=shannon_entropy(value)))
+                                  file_path, lineno, value, entropy=shannon_entropy(value), line=line))
     return findings
 
 
-def _make(rule_id: str, title: str, severity: str, file_path: str, lineno: int, raw: str, entropy: float = None) -> Finding:
+def _make(rule_id: str, title: str, severity: str, file_path: str, lineno: int, raw: str, entropy: float = None,
+          line: str = "") -> Finding:
     extra = f" (entropy {entropy:.2f} bits/char)" if entropy else ""
     return Finding(
         rule_id=rule_id,
@@ -96,4 +97,5 @@ def _make(rule_id: str, title: str, severity: str, file_path: str, lineno: int, 
         cwe="CWE-798",
         owasp=owasp_for_cwe("CWE-798"),
         snippet=redact(raw),
+        fp_basis=(line or "").replace(raw, "<secret>") or None,
     ).with_fingerprint()

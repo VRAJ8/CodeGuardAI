@@ -105,3 +105,70 @@ async def test_fingerprints_survive_line_shifts_and_markers():
     assert fp(before) == fp(after)
     # identical lines in one file still get distinct identities
     assert len({f.fingerprint for f in before.security_issues}) == len(before.security_issues) == 3
+
+
+class TestParserHardening:
+    def test_no_catastrophic_backtracking(self):
+        import time
+        line = "x = 1  # codeguard-ignore -- a" + " " * 1900 + "b"
+        t = time.perf_counter()
+        parse(line * 1)
+        parse((line + "\n") * 200)
+        assert time.perf_counter() - t < 0.5
+
+    def test_html_closer_is_not_a_justification(self):
+        [d] = parse("<!-- codeguard-ignore-next-line -->\nx\n").by_line[2]
+        assert d.justification == ""
+        [d] = parse("<!-- codeguard-ignore: CG-XSS -- ok -->").by_line[1]
+        assert d.justification == "ok"
+
+    @pytest.mark.parametrize("content,language", [
+        ("callback: https://hooks.slack.com/services/T1/B2/abc#codeguard-ignore\n", "config"),
+        ('HELP = """\nexample: token = "x"  # codeguard-ignore\n"""\n', "python"),
+        ("const t = `\n  eval(x) // codeguard-ignore\n`;\n", "javascript"),
+    ])
+    def test_markers_in_url_fragments_and_multiline_strings_do_not_count(self, content, language):
+        assert parse(content, language=language).by_line == {}
+
+
+@pytest.mark.asyncio
+async def test_lone_cr_line_endings_cannot_shift_a_marker_onto_another_statement():
+    code = "import subprocess\rx = 1\nsubprocess.call(input(), shell=True)\nlog('done')  # codeguard-ignore -- benign\n"
+    report = await scan([src("a.py", code, "python")], use_semgrep=False, use_osv=False)  # real Bandit
+    assert any(f.rule_id == "BANDIT-B602" and f.line_number == 3 for f in report.security_issues)
+    assert not any(f.rule_id == "BANDIT-B602" for f in report.suppressed_issues)
+
+
+@pytest.mark.asyncio
+async def test_bandit_fingerprints_survive_markers_and_line_shifts():
+    body = "import pickle\n\n\ndef load(blob):\n    return pickle.loads(blob)\n"
+    fp = lambda r: {f.fingerprint for f in r.security_issues + r.suppressed_issues if f.rule_id == "BANDIT-B301"}  # noqa: E731
+    base = await scan([src("m.py", body, "python")], use_semgrep=False, use_osv=False)
+    marked = await scan([src("m.py", body.replace("loads(blob)", "loads(blob)  # codeguard-ignore: BANDIT-B301 -- trusted"),
+                             "python")], use_semgrep=False, use_osv=False)
+    shifted = await scan([src("m.py", "# header\n# more\n" + body, "python")], use_semgrep=False, use_osv=False)
+    assert fp(base) and fp(base) == fp(marked) == fp(shifted)
+    assert [f.rule_id for f in marked.suppressed_issues] == ["BANDIT-B301"]
+
+
+@pytest.mark.asyncio
+async def test_different_secrets_get_different_fingerprints():
+    code = 'db_password = "Xk9mQ2pL"\napi_secret = "Zr7wT4nB"\n'
+    report = await run(src("cfg.py", code, "python"))
+    fps = [f.fingerprint for f in report.security_issues if f.scanner == "secrets"]
+    assert len(fps) == 2 and len(set(fps)) == 2
+    assert not any("-" in fp for fp in fps), "distinct on content alone, not via the occurrence suffix"
+    # and the persisted/exported data never carries the raw secret in the fingerprint basis
+    assert all("fp_basis" not in f.model_dump() for f in report.security_issues)
+
+
+@pytest.mark.asyncio
+async def test_semgrep_snippets_are_real_source_and_fingerprints_distinct(vulnerable_app):
+    from codeguard.scanners.external import semgrep_available
+    from codeguard.sources import load_directory
+    if not semgrep_available():
+        pytest.skip("semgrep not installed")
+    report = await scan(load_directory(str(vulnerable_app)), use_bandit=False, use_osv=False)
+    sem = [f for f in report.security_issues if f.scanner == "semgrep"]
+    assert sem and all(f.snippet and "requires login" not in f.snippet for f in sem)
+    assert len({f.fingerprint for f in sem}) == len(sem)

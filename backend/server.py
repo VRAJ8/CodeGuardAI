@@ -24,7 +24,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from codeguard import __version__
 from codeguard.ai import ai_enabled, triage
-from codeguard.engine import scan
+from codeguard.engine import disambiguate_fingerprints, scan
 from codeguard.exporters import to_cyclonedx, to_sarif
 from codeguard.models import SEVERITIES, Dependency, Finding
 from codeguard.scanners.external import bandit_available, semgrep_available
@@ -43,6 +43,21 @@ db = client[os.environ.get("DB_NAME", "codeguard")]
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 MAX_CONCURRENT_SCANS = 3
+FINGERPRINT_VERSION = 2  # bump whenever Finding.with_fingerprint changes; see _baseline comparisons
+# Scans run in-process, so one still "processing" after this long was killed by a restart or crash (or is a
+# v2 leftover) and would otherwise hold a concurrency slot forever. Real scans finish in a few minutes.
+STALE_SCAN_AFTER = timedelta(minutes=30)
+STALE_SCAN_ERROR = "Scan interrupted (the server restarted or the scan stalled). Re-scan to try again."
+
+
+async def expire_stale_scans(user_id: Optional[str] = None) -> int:
+    cutoff = (datetime.now(timezone.utc) - STALE_SCAN_AFTER).isoformat()
+    query = {"status": "processing", "created_at": {"$lt": cutoff}}
+    if user_id:
+        query["user_id"] = user_id
+    result = await db.analyses.update_many(query, {"$set": {
+        "status": "failed", "error": STALE_SCAN_ERROR, "progress": {"stage": "Failed", "pct": 100}}})
+    return result.modified_count
 ALLOW_DEV_LOGIN = os.environ.get("ALLOW_DEV_LOGIN", "").lower() == "true"
 
 
@@ -54,6 +69,11 @@ async def lifespan(_app: FastAPI):
         await db.user_sessions.create_index("session_token")
     except Exception as e:  # pragma: no cover - index creation is best-effort
         log.warning("index creation skipped: %s", e)
+    try:
+        if expired := await expire_stale_scans():
+            log.info("marked %d stale processing scans as failed", expired)
+    except Exception as e:  # pragma: no cover
+        log.warning("stale-scan cleanup skipped: %s", e)
     yield
     client.close()
 
@@ -171,16 +191,19 @@ def _new_doc(analysis_id: str, user: User, name: str, source_type: str, source_u
 
 
 async def _guard_concurrency(user: User):
+    await expire_stale_scans(user.user_id)
     running = await db.analyses.count_documents({"user_id": user.user_id, "status": "processing"})
     if running >= MAX_CONCURRENT_SCANS:
-        raise HTTPException(429, f"You already have {running} scans running — wait for one to finish.")
+        raise HTTPException(429, f"You already have {running} scans running. Wait for one to finish, "
+                                 "or delete a stuck one from your scan history.")
 
 
 async def _baseline(user_id: str, name: str, source_url: Optional[str], analysis_id: str) -> Optional[dict]:
     query = {"user_id": user_id, "status": "completed", "analysis_id": {"$ne": analysis_id}}
     query.update({"source_url": source_url} if source_url else {"name": name})
     cur = db.analyses.find(query, {"_id": 0, "analysis_id": 1, "overall_score": 1, "security_issues.fingerprint": 1,
-                                   "suppressed_issues.fingerprint": 1, "created_at": 1}).sort("created_at", -1).limit(1)
+                                   "suppressed_issues.fingerprint": 1, "fingerprint_version": 1, "engine_version": 1,
+                                   "created_at": 1}).sort("created_at", -1).limit(1)
     docs = await cur.to_list(1)
     return docs[0] if docs else None
 
@@ -211,6 +234,9 @@ async def run_pipeline(analysis_id: str, user_id: str, name: str, source_url: Op
         baseline = None
         issues = [f.model_dump() for f in report.security_issues]
         if prev:
+            # Fingerprints are only comparable within one scheme; older scans (v2 engine, or v3 before
+            # fingerprint scheme 2) get a score delta but no new/fixed claims.
+            comparable = prev.get("fingerprint_version") == FINGERPRINT_VERSION
             fps = lambda key: {i.get("fingerprint") for i in prev.get(key) or [] if i.get("fingerprint")}  # noqa: E731
             old, old_suppressed = fps("security_issues"), fps("suppressed_issues")
             new_fps = {i["fingerprint"] for i in issues}
@@ -218,13 +244,16 @@ async def run_pipeline(analysis_id: str, user_id: str, name: str, source_url: Op
             # un-suppressed is not "new": only real code changes move these numbers.
             suppressed_fps = {f.fingerprint for f in report.suppressed_issues}
             for i in issues:
-                i["is_new"] = bool(old) and i["fingerprint"] not in old | old_suppressed
+                i["is_new"] = comparable and i["fingerprint"] not in old | old_suppressed
             baseline = {
                 "analysis_id": prev["analysis_id"], "created_at": prev.get("created_at"),
-                "score_delta": round(report.overall_score - (prev.get("overall_score") or 0), 1),
+                # v2 used a different scoring formula, so a delta against it would be noise, not progress
+                "score_delta": (round(report.overall_score - (prev.get("overall_score") or 0), 1)
+                                if prev.get("engine_version") else None),
                 "new": sum(1 for i in issues if i.get("is_new")),
-                "fixed": len(old - new_fps - suppressed_fps) if old else 0,
-                "suppressed": len(old & suppressed_fps),
+                "fixed": len(old - new_fps - suppressed_fps) if comparable else 0,
+                "suppressed": len(old & suppressed_fps) if comparable else 0,
+                "comparable": comparable,
             }
 
         await db.analyses.update_one({"analysis_id": analysis_id}, {"$set": {
@@ -243,6 +272,7 @@ async def run_pipeline(analysis_id: str, user_id: str, name: str, source_url: Op
             "scanners_run": report.scanners_run,
             "suppressed": report.suppressed,
             "suppressed_issues": [f.model_dump() for f in report.suppressed_issues],
+            "fingerprint_version": FINGERPRINT_VERSION,
             "scan_errors": report.errors,
             "scan_warnings": report.warnings,
             "duration_ms": report.duration_ms,
@@ -321,18 +351,36 @@ def _light(doc: dict) -> dict:
 
 @analysis_router.get("/list")
 async def list_analyses(user: User = Depends(get_current_user)):
+    await expire_stale_scans(user.user_id)
     docs = await db.analyses.find({"user_id": user.user_id}, LIST_PROJECTION).sort("created_at", -1).to_list(200)
     return [_light(d) for d in docs]
 
 
 @analysis_router.get("/stats/dashboard")
 async def dashboard_stats(user: User = Depends(get_current_user)):
+    await expire_stale_scans(user.user_id)
     docs = await db.analyses.find(
         {"user_id": user.user_id},
         {"_id": 0, "ai_refactors": 0, "ai_fixes": 0, "bug_risks": 0, "security_issues.description": 0,
          "security_issues.recommendation": 0, "security_issues.snippet": 0, "suppressed_issues": 0},
     ).sort("created_at", -1).to_list(500)
     return build_dashboard(docs)
+
+
+def _scanner_of(issue: dict) -> str:
+    """v2 findings carry no scanner; infer it from the v2 scanners' fixed `type` strings (mirrors frontend api.js)."""
+    if issue.get("scanner"):
+        return issue["scanner"]
+    kind = issue.get("type") or ""
+    if "secret" in kind.lower():
+        return "secrets"
+    return "osv" if kind.lower().startswith("vulnerable dependency") else "patterns"
+
+
+def _vulnerable_dependency_count(doc: dict) -> int:
+    if doc.get("dependencies"):
+        return sum(1 for dep in doc["dependencies"] if dep.get("vulnerabilities"))
+    return sum(1 for i in doc.get("security_issues", []) if _scanner_of(i) == "osv")  # v2: no inventory, count findings
 
 
 def build_dashboard(docs: List[dict]) -> dict:
@@ -350,7 +398,7 @@ def build_dashboard(docs: List[dict]) -> dict:
             severity[i.get("severity")] += 1
             if i.get("owasp"):
                 owasp[i["owasp"]] += 1
-            scanners[i.get("scanner", "patterns")] += 1
+            scanners[_scanner_of(i)] += 1
 
     languages = Counter()
     for d in projects:
@@ -382,7 +430,7 @@ def build_dashboard(docs: List[dict]) -> dict:
         streak += 1
 
     posture = avg([d["overall_score"] for d in projects]) or 0
-    deps_vulnerable = sum(1 for d in projects for dep in d.get("dependencies", []) if dep.get("vulnerabilities"))
+    deps_vulnerable = sum(_vulnerable_dependency_count(d) for d in projects)
     deps_total = sum(len(d.get("dependencies", [])) for d in projects)
 
     return {
@@ -395,7 +443,7 @@ def build_dashboard(docs: List[dict]) -> dict:
         "score_delta_7d": round(avg(last7) - avg(prev7), 1) if last7 and prev7 else None,
         "total_issues": sum(severity.values()),
         "severity": {s: severity.get(s, 0) for s in SEVERITIES},
-        "secrets": sum(1 for d in projects for i in d.get("security_issues", []) if i.get("scanner") == "secrets"),
+        "secrets": sum(1 for d in projects for i in d.get("security_issues", []) if _scanner_of(i) == "secrets"),
         "vulnerable_dependencies": deps_vulnerable,
         "total_dependencies": deps_total,
         "lines_scanned": sum((d.get("metrics") or {}).get("total_lines", 0) for d in completed),
@@ -425,6 +473,7 @@ async def _get_owned(analysis_id: str, user: User) -> dict:
 
 @analysis_router.get("/{analysis_id}")
 async def get_analysis(analysis_id: str, user: User = Depends(get_current_user)):
+    await expire_stale_scans(user.user_id)  # so a page polling a dead scan sees it fail
     doc = await _get_owned(analysis_id, user)
     if doc.get("overall_score") is not None and not doc.get("grade"):
         doc["grade"] = grade_for(doc["overall_score"])
@@ -444,8 +493,17 @@ def _slug(name: str) -> str:
 async def export_sarif(analysis_id: str, user: User = Depends(get_current_user)):
     doc = await _get_owned(analysis_id, user)
     def load(items):
-        return [Finding(**{"rule_id": "LEGACY", "scanner": "patterns", **i}).with_fingerprint()
-                if not i.get("rule_id") else Finding(**i) for i in items or []]
+        out = []
+        for i in items or []:
+            if i.get("rule_id"):
+                out.append(Finding(**i))
+                continue
+            # v2 finding: give each finding type its own rule so names and severities don't bleed together
+            rule = "LEGACY-" + ("".join(c if c.isalnum() else "-" for c in (i.get("type") or "finding")).strip("-")[:60] or "finding")
+            out.append(Finding(**{"scanner": _scanner_of(i), **i, "rule_id": rule}).with_fingerprint(
+                source_line=i.get("description")))
+        disambiguate_fingerprints(out)
+        return out
     sarif = to_sarif(load(doc.get("security_issues")), load(doc.get("suppressed_issues")))
     return _download(sarif, f"codeguard-{_slug(doc['name'])}.sarif", "application/sarif+json")
 
@@ -453,6 +511,8 @@ async def export_sarif(analysis_id: str, user: User = Depends(get_current_user))
 @analysis_router.get("/{analysis_id}/sbom")
 async def export_sbom(analysis_id: str, user: User = Depends(get_current_user)):
     doc = await _get_owned(analysis_id, user)
+    if not doc.get("engine_version"):
+        raise HTTPException(409, "This scan predates the dependency inventory. Re-scan the project to export an SBOM.")
     deps = [Dependency(**d) for d in doc.get("dependencies", [])]
     return _download(to_cyclonedx(deps, doc["name"]), f"codeguard-{_slug(doc['name'])}.cdx.json",
                      "application/vnd.cyclonedx+json")

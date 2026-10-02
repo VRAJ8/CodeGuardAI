@@ -104,23 +104,26 @@ export default function Dashboard() {
 
   useEffect(() => {
     let timer;
+    let cancelled = false; // a request still in flight at unmount must not re-arm the poll
     const load = async () => {
       try {
         const [s, u] = await Promise.all([axios.get(`${API}/analysis/stats/dashboard`), axios.get(`${API}/auth/me`)]);
         // Older APIs return a slim summary; rebuild the widgets from the full scan list instead.
         const legacy = !Array.isArray(s.data?.owasp) && s.data?.total_analyses > 0;
         const history = legacy ? (await axios.get(`${API}/analysis/list`)).data : undefined;
+        if (cancelled) return;
         const next = normalizeDashboard(s.data, history);
         setStats(next);
         setUser(u.data);
         if (next.running > 0) timer = setTimeout(load, 4000);
       } catch {
+        if (cancelled) return;
         toast.error("Couldn't load your dashboard");
         setStats((prev) => prev || normalizeDashboard({}));
       }
     };
     load();
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, []);
 
   const actions = (
@@ -188,7 +191,7 @@ export default function Dashboard() {
           <StatTile className="fade-up d-3" label="Secrets leaked" icon={KeyRound} bg="#FFE14D" value={stats.secrets || 0}
                     hint={stats.secrets ? "Rotate these first. Seriously." : "No hardcoded creds 🎉"} />
           <StatTile className="fade-up d-4" label="Vulnerable deps" icon={Package} bg="#C9B6FF"
-                    value={<>{stats.vulnerable_dependencies || 0}<span className="text-2xl text-ink/60"> / {stats.total_dependencies || 0}</span></>}
+                    value={<>{stats.vulnerable_dependencies || 0}{stats.total_dependencies > 0 && <span className="text-2xl text-ink/60"> / {stats.total_dependencies}</span>}</>}
                     hint="Known CVEs via OSV.dev" />
           <StatTile className="fade-up d-5" label="Fixed on re-scan" icon={Wrench} bg="#7CF0B4" value={stats.fixed_total || 0}
                     hint="Findings that disappeared. W." />

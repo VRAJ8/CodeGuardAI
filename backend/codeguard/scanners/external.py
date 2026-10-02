@@ -132,6 +132,7 @@ def run_semgrep(files: List[SourceFile], timeout: int = 120) -> List[Finding]:
     if not code or not exe or not RULES_DIR.exists():
         return []
     tmp, mapping = materialize(code)
+    by_path = {f.path: f for f in code}
     try:
         proc = subprocess.run(
             [exe, "scan", "--config", str(RULES_DIR), "--json", "--metrics=off",
@@ -163,6 +164,17 @@ def run_semgrep(files: List[SourceFile], timeout: int = 120) -> List[Finding]:
             recommendation=meta.get("fix") or "Review the flagged data flow and apply the remediation in the message.",
             cwe=cwe,
             owasp=owasp_for_cwe(cwe),
-            snippet=(extra.get("lines") or "").strip()[:300],
+            snippet=_source_snippet(by_path.get(_original(mapping, tmp, r.get("path", ""))), r) or None,
         ).with_fingerprint())
     return findings
+
+
+def _source_snippet(src: Optional[SourceFile], result: dict) -> str:
+    """The flagged lines from our own copy of the file. Semgrep's extra.lines is unusable: recent OSS
+    releases return the literal string 'requires login' instead of the code."""
+    start = (result.get("start") or {}).get("line")
+    if not src or not start:
+        return ""
+    end = max(start, (result.get("end") or {}).get("line") or start)
+    lines = src.content.split("\n")[start - 1:min(end, start + 4)]
+    return "\n".join(line.rstrip() for line in lines).strip()[:300]

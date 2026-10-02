@@ -23,14 +23,14 @@ from typing import Dict, List, Optional, Set, Tuple
 from .models import Finding, SourceFile, Suppression
 
 TOKEN = re.compile(r"codeguard-ignore(?P<next>-next-line)?(?![\w-])")
-LEADERS = ("#", "//", "/*", "<!--", "--")
+LEADERS = ("<!--", "//", "/*", "#", "--")
+# A comment leader must start the line or follow whitespace/punctuation (so "...abc#codeguard-ignore" in a URL is not one).
+LEADER_PREFIX = set(" \t;{}(),")
+CLOSERS = ("*/}", "*/", "-->")
 RULE = r"[A-Za-z][A-Za-z0-9_.\-]*[A-Za-z0-9]"
-# What may follow the marker: optional ": RULE, RULE", optional "-- justification", optional comment closer.
-TAIL = re.compile(
-    rf"^(?:\s*:\s*(?P<rules>{RULE}(?:\s*,\s*{RULE})*))?"
-    r"(?:\s+--\s*(?P<why>.*?))?"
-    r"\s*(?:\*/\s*\}?|-->)?\s*$"
-)
+# Applied after the comment closer is stripped. No nested quantifiers over the same characters, so matching is linear.
+TAIL = re.compile(rf"^(?:\s*:\s*(?P<rules>{RULE}(?:\s*,\s*{RULE})*))?(?:\s+--(?P<why>.*))?$")
+MAX_MARKER_LINE = 2000  # longer lines (minified bundles) are never searched for markers
 ALL = "*"
 
 
@@ -53,26 +53,64 @@ def _in_string(prefix: str) -> bool:
     return any(unescaped.count(q) % 2 for q in ('"', "'", "`"))
 
 
-def parse(content: str, path: str = "") -> ParseResult:
+def _multiline_string_lines(lines: List[str], language: str) -> Set[int]:
+    """1-based numbers of lines that *start* inside a multi-line string (Python triple quotes, JS template
+    literals). Markers on those lines are string content, so they are ignored (fail closed)."""
+    inside: Set[int] = set()
+    if language == "python":
+        delims = ('"""', "'''")
+    elif language in ("javascript", "typescript"):
+        delims = ("`",)
+    else:
+        return inside
+    open_delim = None
+    for n, line in enumerate(lines, 1):
+        if open_delim:
+            inside.add(n)
+        text = re.sub(r"\\.", "", line)
+        for d in delims:
+            if open_delim and d != open_delim:
+                continue
+            if text.count(d) % 2:
+                open_delim = None if open_delim else d
+    return inside
+
+
+def _strip_closer(tail: str) -> str:
+    tail = tail.rstrip()
+    for closer in CLOSERS:
+        if tail.endswith(closer):
+            return tail[: -len(closer)].rstrip()
+    return tail
+
+
+def parse(content: str, path: str = "", language: str = "") -> ParseResult:
     out = ParseResult()
     if "codeguard-ignore" not in content:
         return out
-    for lineno, line in enumerate(content.split("\n"), 1):
-        line = line.rstrip("\r")
+    lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    in_multiline = _multiline_string_lines(lines, language)
+    for lineno, line in enumerate(lines, 1):
+        if lineno in in_multiline or len(line) > MAX_MARKER_LINE or "codeguard-ignore" not in line:
+            continue
         for m in TOKEN.finditer(line):
             before = line[: m.start()].rstrip()
             leader = next((ld for ld in LEADERS if before.endswith(ld)), None)
-            if leader is None or _in_string(before[: -len(leader)]):
-                continue  # not a comment marker (string content, prose, URL, lookalike word)
-            tail = TAIL.match(line[m.end():])
+            if leader is None:
+                continue
+            ahead = before[: -len(leader)]
+            if (ahead and ahead[-1] not in LEADER_PREFIX) or _in_string(ahead):
+                continue  # URL fragment, lookalike word, or a marker inside a string literal
+            tail = TAIL.match(_strip_closer(line[m.end():]))
             if not tail:
                 out.warnings.append(f"{path}:{lineno}: malformed codeguard-ignore marker ignored "
                                     f"(expected 'codeguard-ignore[-next-line][: RULE, ...] [-- reason]')")
-                continue
+                break
             rules = {r.strip().upper() for r in tail.group("rules").split(",")} if tail.group("rules") else {ALL}
             target = lineno + 1 if m.group("next") else lineno
             out.by_line.setdefault(target, []).append(
                 Directive(rules=rules, marker_line=lineno, justification=(tail.group("why") or "").strip()))
+            break  # one directive per line
     return out
 
 
@@ -83,7 +121,7 @@ def apply(findings: List[Finding], files: List[SourceFile]) -> Tuple[List[Findin
     warnings: List[str] = []
     for f in files:
         if "codeguard-ignore" in f.content:
-            parsed[f.path] = parse(f.content, f.path)
+            parsed[f.path] = parse(f.content, f.path, f.language)
             warnings += parsed[f.path].warnings
     active, suppressed = [], []
     for f in findings:

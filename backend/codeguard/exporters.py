@@ -41,7 +41,7 @@ def to_sarif(findings: List[Finding], suppressed: Optional[List[Finding]] = None
             "level": SARIF_LEVEL[f.severity],
             "message": {"text": f"{f.description}\n\nFix: {f.recommendation}"},
             "locations": [location],
-            "partialFingerprints": {"codeguard/v1": f.fingerprint},
+            "partialFingerprints": {"codeguard/v2": f.fingerprint},
             "properties": {"severity": f.severity, "cwe": f.cwe, "owasp": f.owasp},
         })
         if f.suppression:
