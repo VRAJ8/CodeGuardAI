@@ -20,10 +20,17 @@ const FEATURES = [
 
 const ENGINES = ["Bandit", "Semgrep", "OSV.dev", "Radon", "SARIF 2.1", "CycloneDX 1.5", "OWASP Top 10", "CVSS v3.1", "GitHub Actions", "Docker"];
 
+// Illustrative before/after diff for the hero mock-up. The "before" line is deliberately vulnerable.
+const DEMO_PATCH = [
+  // codeguard-ignore-next-line: CG-SQLI-CONCAT -- marketing copy showing what CodeGuard catches
+  `- db.query("SELECT * FROM charges WHERE id='" + id + "'")`,
+  `+ db.query("SELECT * FROM charges WHERE id = $1", [id])`,
+].join("\n");
+
 const CI_YAML = `- uses: VRAJ8/CodeGuardAI@main
   with:
     fail-on: high
-- uses: github/codeql-action/upload-sarif@v3
+- uses: github/codeql-action/upload-sarif@v4
   with:
     sarif_file: codeguard.sarif`;
 
@@ -137,8 +144,7 @@ export default function Landing() {
               </div>
               <div className="mt-4 rounded-[10px] border-2 border-ink overflow-hidden">
                 <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-extrabold bg-lilac border-b-2 border-ink"><Sparkles className="w-3.5 h-3.5" strokeWidth={3} /> Suggested patch</div>
-                <pre className="code-block !rounded-none !border-0 !text-[11px] !leading-5 !p-3">{`- db.query("SELECT * FROM charges WHERE id='" + id + "'")
-+ db.query("SELECT * FROM charges WHERE id = $1", [id])`}</pre>
+                <pre className="code-block !rounded-none !border-0 !text-[11px] !leading-5 !p-3">{DEMO_PATCH}</pre>
               </div>
             </div>
           </div>

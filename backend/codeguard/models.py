@@ -104,4 +104,5 @@ class ScanReport(BaseModel):
     owasp_counts: Dict[str, int]
     scanner_counts: Dict[str, int]
     scanners_run: List[str] = Field(default_factory=list)
+    suppressed: int = 0  # findings silenced by codeguard-ignore comments
     duration_ms: int = 0

@@ -10,7 +10,7 @@ import AppShell from "@/components/AppShell";
 import {
   ActivityHeatmap, ChartTooltip, Delta, EmptyState, GradePill, GradeSticker, SeverityBar, Spinner, StatTile,
 } from "@/components/viz";
-import { API, compact, timeAgo } from "@/lib/api";
+import { API, compact, normalizeDashboard, timeAgo } from "@/lib/api";
 import { CHART, GRADE, SCANNERS, languageColor } from "@/lib/theme";
 
 export const DEMO_REPOS = [
@@ -107,12 +107,12 @@ export default function Dashboard() {
     const load = async () => {
       try {
         const [s, u] = await Promise.all([axios.get(`${API}/analysis/stats/dashboard`), axios.get(`${API}/auth/me`)]);
-        setStats(s.data);
+        setStats(normalizeDashboard(s.data));
         setUser(u.data);
         if (s.data.running > 0) timer = setTimeout(load, 4000);
       } catch {
         toast.error("Couldn't load your dashboard");
-        setStats((prev) => prev || { total_analyses: 0, recent_analyses: [] });
+        setStats((prev) => prev || normalizeDashboard({}));
       }
     };
     load();
@@ -237,6 +237,11 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 mt-5">
         <Card className="xl:col-span-7" title="OWASP Top 10 exposure" subtitle="Findings in each project's latest scan, by 2021 category"
               right={<span className="w-9 h-9 grid place-items-center rounded-lg border-2 border-ink bg-lilac"><Radar className="w-4 h-4" strokeWidth={2.5} /></span>}>
+          {stats.legacy && (
+            <p className="mb-4 p-3 rounded-[10px] border-2 border-ink bg-cream text-[13px] font-semibold">
+              OWASP mapping arrives with the v3 scan engine. Re-scan a project once the API is updated.
+            </p>
+          )}
           <div className="space-y-2.5">
             {stats.owasp.map((o) => (
               <div key={o.code} className="group grid grid-cols-[46px_1fr_30px] sm:grid-cols-[46px_230px_1fr_30px] items-center gap-3 text-[14px]"

@@ -236,6 +236,7 @@ async def run_pipeline(analysis_id: str, user_id: str, name: str, source_url: Op
             "owasp_counts": report.owasp_counts,
             "scanner_counts": report.scanner_counts,
             "scanners_run": report.scanners_run,
+            "suppressed": report.suppressed,
             "duration_ms": report.duration_ms,
             "repo_meta": repo_meta,
             "baseline": baseline,
@@ -498,9 +499,14 @@ app.include_router(analysis_router)
 
 DEFAULT_ORIGINS = "http://localhost:3000,https://codevigil.netlify.app"
 origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", DEFAULT_ORIGINS).split(",") if o.strip()]
+# Opt-in pattern for preview deploys, e.g. ^https://deploy-preview-\d+--codevigil\.netlify\.app$
+# Credentialed CORS for previews means any deploy preview can call the API as the visitor, so only
+# enable it when previews are never built from untrusted (fork) pull requests.
+origin_regex = os.environ.get("CORS_ORIGIN_REGEX") or None
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
+    allow_origin_regex=origin_regex if os.environ.get("ENV") == "prod" else None,
     allow_origins=origins if os.environ.get("ENV") == "prod" else ["*"],
     allow_methods=["*"],
     allow_headers=["*"],

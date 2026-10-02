@@ -14,6 +14,7 @@ from .scanners.patterns import scan_patterns
 from .scanners.secrets import scan_secrets
 from .scoring import overall
 from .sources import iter_code
+from .suppressions import apply as apply_suppressions
 
 ProgressFn = Callable[[str, int], Awaitable[None]]
 # When two scanners flag the same line+CWE, keep the more precise tool's result.
@@ -76,7 +77,7 @@ async def scan(
     all_health: List[BugRisk] = [analyze_file(f.content, f.path, f.language) for f in code_files]
     risks = sorted((r for r in all_health if r.risk_score > 0), key=lambda r: -r.risk_score)
 
-    findings = dedupe(findings)
+    findings, suppressed = apply_suppressions(dedupe(findings), files)
     languages = Counter()
     for f in code_files:
         languages[f.language] += f.lines
@@ -101,5 +102,6 @@ async def scan(
         owasp_counts=dict(Counter(f.owasp for f in findings if f.owasp).most_common()),
         scanner_counts=dict(Counter(f.scanner for f in findings).most_common()),
         scanners_run=scanners_run,
+        suppressed=suppressed,
         duration_ms=int((time.monotonic() - started) * 1000),
     )

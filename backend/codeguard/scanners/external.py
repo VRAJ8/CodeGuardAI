@@ -125,12 +125,13 @@ SEMGREP_SEVERITY = {"ERROR": "high", "WARNING": "medium", "INFO": "low"}
 
 def run_semgrep(files: List[SourceFile], timeout: int = 120) -> List[Finding]:
     code = [f for f in files if f.language not in {"json", "config", "unknown"}]
-    if not code or not RULES_DIR.exists():
+    exe = shutil.which("semgrep")  # absolute path: never rely on a bare name at exec time
+    if not code or not exe or not RULES_DIR.exists():
         return []
     tmp, mapping = materialize(code)
     try:
         proc = subprocess.run(
-            ["semgrep", "scan", "--config", str(RULES_DIR), "--json", "--metrics=off",
+            [exe, "scan", "--config", str(RULES_DIR), "--json", "--metrics=off",
              "--disable-version-check", "--quiet", "--timeout", "20", tmp],
             capture_output=True, text=True, timeout=timeout,
         )

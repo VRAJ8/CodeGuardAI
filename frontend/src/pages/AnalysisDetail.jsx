@@ -362,11 +362,11 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: VRAJ8/CodeGuardAI@main
         with:
           fail-on: high          # block merges on high/critical findings
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: codeguard.sarif`;

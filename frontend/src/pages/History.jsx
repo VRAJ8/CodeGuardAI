@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Search, Plus, Github, FileArchive, Loader2, Trash2, ChevronRight, History as HistoryIcon } from "lucide-react";
 import AppShell from "@/components/AppShell";
 import { Delta, EmptyState, GradePill, SeverityBar, Spinner } from "@/components/viz";
-import { API, compact, timeAgo } from "@/lib/api";
+import { API, compact, normalizeAnalysis, timeAgo } from "@/lib/api";
 
 const SORTS = { recent: "Newest", score_asc: "Lowest score", score_desc: "Highest score", issues: "Most findings" };
 
@@ -21,7 +21,7 @@ export default function History() {
     let timer;
     const load = () =>
       axios.get(`${API}/analysis/list`).then((r) => {
-        setItems(r.data);
+        setItems(r.data.map(normalizeAnalysis));
         if (r.data.some((a) => a.status === "processing")) timer = setTimeout(load, 4000);
       }).catch(() => { toast.error("Couldn't load scans"); setItems([]); });
     load();

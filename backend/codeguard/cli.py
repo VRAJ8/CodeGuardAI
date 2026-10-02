@@ -31,7 +31,8 @@ def _table(report, use_color: bool) -> str:
         out.append(f"  {c(COLORS[f.severity])}{f.severity.upper():<8}{c(RESET)} {f.type}")
         out.append(f"           {c(DIM)}{loc}  [{f.rule_id}{' · ' + f.cwe if f.cwe else ''}]{c(RESET)}")
     counts = " ".join(f"{s}={report.severity_counts[s]}" for s in SEVERITIES)
-    out += ["", f"{len(report.security_issues)} findings ({counts})"]
+    suppressed = f", {report.suppressed} suppressed inline" if report.suppressed else ""
+    out += ["", f"{len(report.security_issues)} findings ({counts}){suppressed}"]
     return "\n".join(out)
 
 
