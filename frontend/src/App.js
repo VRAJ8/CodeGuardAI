@@ -12,10 +12,10 @@ import AnalysisDetail from "./pages/AnalysisDetail";
 import History from "./pages/History";
 
 const FullscreenSpinner = ({ label }) => (
-  <div className="min-h-screen bg-[#09090b] grid place-items-center">
+  <div className="min-h-screen grid place-items-center">
     <div className="text-center">
-      <div className="w-8 h-8 mx-auto border-2 border-[#00E599] border-t-transparent rounded-full animate-spin" />
-      {label && <p className="mt-4 text-sm text-[#71717a]">{label}</p>}
+      <div className="w-12 h-12 mx-auto rounded-xl border-[3px] border-ink bg-yel shadow-brut animate-spin [animation-duration:1.4s]" />
+      {label && <p className="mt-4 text-sm font-mono">{label}</p>}
     </div>
   </div>
 );
@@ -90,7 +90,7 @@ export default function App() {
       </BrowserRouter>
       <Toaster
         position="bottom-right"
-        toastOptions={{ style: { background: "#18181b", border: "1px solid rgba(255,255,255,.1)", color: "#f4f4f5" } }}
+        toastOptions={{ style: { background: "#FFFDF8", border: "2.5px solid #111", boxShadow: "4px 4px 0 0 #111", color: "#111", borderRadius: 12, fontWeight: 600 } }}
       />
     </div>
   );

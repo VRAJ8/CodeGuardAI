@@ -9,52 +9,52 @@ export function SeverityBadge({ severity, size = "sm" }) {
   const Icon = SEVERITY_ICON[severity] || Info;
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-md font-medium uppercase tracking-wide ${
-        size === "sm" ? "text-[10px] px-1.5 h-5" : "text-xs px-2 h-6"
+      className={`inline-flex items-center gap-1 border-2 border-ink rounded-md font-extrabold uppercase tracking-wide text-ink ${
+        size === "sm" ? "text-[10px] px-1.5 h-[22px]" : "text-xs px-2 h-7"
       }`}
-      style={{ color: s.color, background: `${s.color}1f`, boxShadow: `inset 0 0 0 1px ${s.color}40` }}
+      style={{ background: s.color }}
     >
-      <Icon className="w-3 h-3" strokeWidth={2.5} />
+      <Icon className="w-3 h-3" strokeWidth={3} />
       {s.label}
     </span>
   );
 }
 
 export function GradePill({ grade, className = "" }) {
-  if (!grade) return <span className={`text-[#71717a] ${className}`}>—</span>;
-  const g = GRADE[grade];
+  if (!grade) {
+    return <span className={`inline-grid place-items-center w-9 h-9 rounded-lg border-2 border-ink bg-snow font-bold text-faint ${className}`}>?</span>;
+  }
   return (
     <span
-      className={`inline-grid place-items-center w-8 h-8 rounded-lg font-bold text-sm ${className}`}
-      style={{ color: g.color, background: g.bg, boxShadow: `inset 0 0 0 1px ${g.color}40` }}
-      title={`Grade ${grade} — ${g.vibe}`}
+      className={`inline-grid place-items-center w-9 h-9 rounded-lg border-2 border-ink shadow-brut-sm font-display font-extrabold text-lg text-ink ${className}`}
+      style={{ background: GRADE[grade].color }}
+      title={`Grade ${grade}: ${GRADE[grade].vibe}`}
     >
       {grade}
     </span>
   );
 }
 
-/** Radial gauge with the letter grade as the hero and the score underneath. */
-export function GradeRing({ score, grade, size = 168, label = "Security posture" }) {
-  const g = GRADE[grade] || { color: "#71717a" };
-  const r = size / 2 - 10;
-  const c = 2 * Math.PI * r;
-  const pct = Math.max(0, Math.min(100, score || 0)) / 100;
+/** The hero: a tilted sticker with the letter grade, score bar underneath. */
+export function GradeSticker({ score, grade, size = "lg", label = "Security posture" }) {
+  const g = GRADE[grade] || { color: "#fffdf8" };
+  const big = size === "lg";
+  const pct = Math.max(0, Math.min(100, score || 0));
   return (
-    <div className="relative" style={{ width: size, height: size }} role="img" aria-label={`${label}: grade ${grade}, ${Math.round(score || 0)} out of 100`}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#1f1f23" strokeWidth="8" />
-        <circle
-          cx={size / 2} cy={size / 2} r={r} fill="none" stroke={g.color} strokeWidth="8" strokeLinecap="round"
-          strokeDasharray={`${c * pct} ${c}`} style={{ transition: "stroke-dasharray 1s cubic-bezier(.2,.7,.2,1)", filter: `drop-shadow(0 0 10px ${g.color}66)` }}
-        />
-      </svg>
-      <div className="absolute inset-0 grid place-items-center text-center">
-        <div>
-          <div className="font-bold leading-none" style={{ color: g.color, fontSize: size * 0.34 }}>{grade || "—"}</div>
-          <div className="mt-1 text-xs text-[#a1a1aa] tabular">{score != null ? `${Math.round(score)}/100` : "no data"}</div>
-        </div>
+    <div className="flex flex-col items-center" role="img" aria-label={`${label}: grade ${grade || "none"}, ${Math.round(score || 0)} out of 100`}>
+      <div
+        className={`wiggle relative grid place-items-center border-[3px] border-ink rounded-[22px] shadow-brut-lg -rotate-3 ${big ? "w-40 h-40" : "w-28 h-28"}`}
+        style={{ background: g.color }}
+      >
+        <span className={`font-display font-extrabold leading-none ${big ? "text-[104px]" : "text-[72px]"}`}>{grade || "–"}</span>
+        <span className="absolute -top-3 -right-3 rotate-12 bg-snow border-2 border-ink rounded-full px-2 h-7 grid place-items-center text-xs font-mono font-bold">
+          {score != null ? Math.round(score) : "–"}
+        </span>
       </div>
+      <div className={`mt-6 ${big ? "w-40" : "w-28"} h-3 rounded-full border-2 border-ink bg-snow overflow-hidden`}>
+        <div className="h-full bg-ink" style={{ width: `${pct}%`, transition: "width 1s cubic-bezier(.2,.7,.2,1)" }} />
+      </div>
+      <div className="mt-1.5 text-[11px] font-mono font-bold">{score != null ? `${Math.round(score)}/100` : "no data"}</div>
     </div>
   );
 }
@@ -64,57 +64,63 @@ export function Delta({ value, suffix = "", invert = false }) {
   const good = invert ? value < 0 : value > 0;
   const Icon = value > 0 ? TrendingUp : TrendingDown;
   return (
-    <span className={`inline-flex items-center gap-1 text-xs font-medium ${good ? "text-[#4ade80]" : "text-[#f87171]"}`}>
-      <Icon className="w-3.5 h-3.5" />
+    <span className={`inline-flex items-center gap-1 h-6 px-2 rounded-full border-2 border-ink text-[11px] font-extrabold ${good ? "bg-mint" : "bg-cherry"}`}>
+      <Icon className="w-3 h-3" strokeWidth={3} />
       {value > 0 ? "+" : ""}{value}{suffix}
     </span>
   );
 }
 
-export function StatTile({ label, value, hint, icon: Icon, accent = "#a1a1aa", delta, className = "" }) {
+/** KPI block: flat color fill, ink outline, hard shadow. */
+export function StatTile({ label, value, hint, icon: Icon, bg = "#fffdf8", delta, className = "" }) {
   return (
-    <div className={`card p-5 ${className}`}>
+    <div className={`card card-hover p-5 ${className}`} style={{ background: bg }}>
       <div className="flex items-center justify-between">
-        <span className="eyebrow">{label}</span>
-        {Icon && <Icon className="w-4 h-4" style={{ color: accent }} />}
+        <span className="eyebrow !text-ink">{label}</span>
+        {Icon && (
+          <span className="w-8 h-8 grid place-items-center rounded-lg border-2 border-ink bg-snow">
+            <Icon className="w-4 h-4" strokeWidth={2.5} />
+          </span>
+        )}
       </div>
       <div className="mt-3 flex items-baseline gap-2">
-        <span className="text-[28px] font-semibold tracking-tight leading-none">{value}</span>
+        <span className="font-display text-[44px] font-extrabold tracking-tight leading-none">{value}</span>
         {delta}
       </div>
-      {hint && <div className="mt-2 text-xs text-[#71717a]">{hint}</div>}
+      {hint && <div className="mt-2 text-[13px] font-medium text-ink/70">{hint}</div>}
     </div>
   );
 }
 
 /** Part-to-whole bar for severity counts. Status colors always paired with icon + label. */
-export function SeverityBar({ counts, showLegend = true, height = 10 }) {
+export function SeverityBar({ counts, showLegend = true, height = 14 }) {
   const total = SEVERITY_ORDER.reduce((s, k) => s + (counts?.[k] || 0), 0);
   const [hover, setHover] = useState(null);
   return (
     <div>
-      <div className="relative flex gap-[2px] rounded-full overflow-hidden bg-[#1c1c20]" style={{ height }}>
-        {total > 0 &&
-          SEVERITY_ORDER.filter((k) => counts?.[k]).map((k) => (
-            <div
-              key={k}
-              className="h-full transition-opacity"
-              style={{ width: `${(counts[k] / total) * 100}%`, background: SEVERITY[k].color, opacity: hover && hover !== k ? 0.35 : 1 }}
-              onMouseEnter={() => setHover(k)}
-              onMouseLeave={() => setHover(null)}
-              title={`${SEVERITY[k].label}: ${counts[k]} (${Math.round((counts[k] / total) * 100)}%)`}
-            />
-          ))}
+      <div className="flex gap-[2px] p-[2px] rounded-full border-2 border-ink bg-snow overflow-hidden" style={{ height: height + 8 }}>
+        {total > 0 ? SEVERITY_ORDER.filter((k) => counts?.[k]).map((k, i, arr) => (
+          <div
+            key={k}
+            className={`h-full transition-opacity ${i === 0 ? "rounded-l-full" : ""} ${i === arr.length - 1 ? "rounded-r-full" : ""}`}
+            style={{ width: `${(counts[k] / total) * 100}%`, background: SEVERITY[k].color, opacity: hover && hover !== k ? 0.3 : 1 }}
+            onMouseEnter={() => setHover(k)}
+            onMouseLeave={() => setHover(null)}
+            title={`${SEVERITY[k].label}: ${counts[k]} (${Math.round((counts[k] / total) * 100)}%)`}
+          />
+        )) : height >= 10 && <div className="w-full grid place-items-center text-[10px] font-mono font-bold text-faint">ALL CLEAR</div>}
       </div>
       {showLegend && (
         <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
           {SEVERITY_ORDER.map((k) => {
             const Icon = SEVERITY_ICON[k];
             return (
-              <div key={k} className="flex items-center gap-2 text-xs" onMouseEnter={() => setHover(k)} onMouseLeave={() => setHover(null)}>
-                <Icon className="w-3.5 h-3.5" style={{ color: SEVERITY[k].color }} />
-                <span className="text-[#a1a1aa]">{SEVERITY[k].label}</span>
-                <span className="ml-auto sm:ml-0 font-medium tabular text-white">{counts?.[k] || 0}</span>
+              <div key={k} className="flex items-center gap-2 text-[13px]" onMouseEnter={() => setHover(k)} onMouseLeave={() => setHover(null)}>
+                <span className="w-5 h-5 grid place-items-center rounded border-2 border-ink" style={{ background: SEVERITY[k].color }}>
+                  <Icon className="w-3 h-3" strokeWidth={3} />
+                </span>
+                <span className="font-semibold">{SEVERITY[k].label}</span>
+                <span className="ml-auto sm:ml-0 font-mono font-bold tabular">{counts?.[k] || 0}</span>
               </div>
             );
           })}
@@ -127,12 +133,12 @@ export function SeverityBar({ counts, showLegend = true, height = 10 }) {
 export function ChartTooltip({ active, payload, label, formatter, labelFormatter }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-lg border border-white/10 bg-[#18181b]/95 backdrop-blur px-3 py-2 shadow-xl text-xs">
-      {label != null && <div className="text-[#a1a1aa] mb-1">{labelFormatter ? labelFormatter(label, payload) : label}</div>}
+    <div className="rounded-lg border-2 border-ink bg-snow shadow-brut px-3 py-2 text-xs">
+      {label != null && <div className="font-semibold mb-1">{labelFormatter ? labelFormatter(label, payload) : label}</div>}
       {payload.map((p) => (
         <div key={p.dataKey} className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-sm" style={{ background: p.color || p.payload?.fill }} />
-          <span className="font-medium text-white tabular">{formatter ? formatter(p.value, p) : p.value}</span>
+          <span className="w-2.5 h-2.5 rounded-sm border border-ink" style={{ background: p.color || p.payload?.fill }} />
+          <span className="font-mono font-bold tabular">{formatter ? formatter(p.value, p) : p.value}</span>
         </div>
       ))}
     </div>
@@ -146,11 +152,11 @@ export function ActivityHeatmap({ days }) {
   const [hover, setHover] = useState(null);
   return (
     <div>
-      <div className="grid grid-flow-col grid-rows-7 gap-1 w-fit">
+      <div className="grid grid-flow-col grid-rows-7 gap-1.5 w-fit">
         {days.map((d) => (
           <div
             key={d.date}
-            className="w-[22px] h-[22px] rounded-[4px] transition-transform hover:scale-110"
+            className="w-[22px] h-[22px] rounded-[5px] border-2 border-ink transition-transform hover:scale-110 hover:-rotate-6"
             style={{ background: ACTIVITY_RAMP[level(d.count)] }}
             onMouseEnter={() => setHover(d)}
             onMouseLeave={() => setHover(null)}
@@ -158,15 +164,15 @@ export function ActivityHeatmap({ days }) {
           />
         ))}
       </div>
-      <div className="mt-3 flex items-center justify-between text-[11px] text-[#71717a] h-4">
+      <div className="mt-3 flex items-center justify-between gap-3 text-[11px] font-mono text-sub h-4">
         <span>
           {hover
             ? `${new Date(hover.date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${hover.count} scan${hover.count === 1 ? "" : "s"}`
-            : "Last 4 weeks"}
+            : "last 4 weeks"}
         </span>
         <span className="flex items-center gap-1">
           less
-          {ACTIVITY_RAMP.map((c) => <span key={c} className="w-2.5 h-2.5 rounded-[2px]" style={{ background: c }} />)}
+          {ACTIVITY_RAMP.map((c) => <span key={c} className="w-3 h-3 rounded-[3px] border border-ink" style={{ background: c }} />)}
           more
         </span>
       </div>
@@ -178,12 +184,12 @@ export function EmptyState({ icon: Icon, title, body, action }) {
   return (
     <div className="card p-10 text-center">
       {Icon && (
-        <div className="mx-auto mb-4 w-12 h-12 rounded-2xl grid place-items-center bg-white/[0.04] border border-white/[0.07]">
-          <Icon className="w-5 h-5 text-[#a1a1aa]" />
+        <div className="mx-auto mb-4 w-14 h-14 rounded-2xl grid place-items-center border-2 border-ink bg-yel shadow-brut-sm -rotate-6">
+          <Icon className="w-6 h-6" strokeWidth={2.5} />
         </div>
       )}
-      <div className="font-medium">{title}</div>
-      {body && <p className="mt-1 text-sm text-[#71717a] max-w-sm mx-auto">{body}</p>}
+      <div className="font-display text-xl font-extrabold">{title}</div>
+      {body && <p className="mt-1 text-sm text-sub max-w-sm mx-auto">{body}</p>}
       {action && <div className="mt-5">{action}</div>}
     </div>
   );
@@ -193,8 +199,8 @@ export function Spinner({ label }) {
   return (
     <div className="min-h-[60vh] grid place-items-center">
       <div className="text-center">
-        <div className="w-8 h-8 mx-auto rounded-full border-2 border-[#00e599] border-t-transparent animate-spin" />
-        {label && <p className="mt-3 text-sm text-[#71717a]">{label}</p>}
+        <div className="w-12 h-12 mx-auto rounded-xl border-[3px] border-ink bg-yel shadow-brut animate-spin [animation-duration:1.4s]" />
+        {label && <p className="mt-4 text-sm font-mono">{label}</p>}
       </div>
     </div>
   );

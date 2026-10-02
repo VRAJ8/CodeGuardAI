@@ -52,7 +52,30 @@ module.exports = {
   				'3': 'hsl(var(--chart-3))',
   				'4': 'hsl(var(--chart-4))',
   				'5': 'hsl(var(--chart-5))'
-  			}
+  			},
+  			// Neo-brutalist palette (see src/lib/theme.js for chart/status tokens)
+  			ink: '#111111',
+  			cream: '#F4EFE6',
+  			snow: '#FFFDF8',
+  			sub: '#4A463F',
+  			faint: '#8A847A',
+  			yel: '#FFE14D',
+  			pink: '#FF8AD8',
+  			cobalt: '#3B5BFF',
+  			lime: '#B8F35E',
+  			tang: '#FF9F43',
+  			lilac: '#C9B6FF',
+  			cherry: '#FF5A5F',
+  			mint: '#7CF0B4'
+  		},
+  		boxShadow: {
+  			'brut-sm': '2px 2px 0 0 #111111',
+  			brut: '4px 4px 0 0 #111111',
+  			'brut-lg': '7px 7px 0 0 #111111'
+  		},
+  		fontFamily: {
+  			display: ['"Bricolage Grotesque Variable"', '"Bricolage Grotesque"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+  			mono: ['"Space Mono"', 'ui-monospace', 'monospace']
   		},
   		keyframes: {
   			'accordion-down': {

@@ -1,7 +1,8 @@
-// Design tokens shared by every page and chart.
-// Categorical slots are validated (CVD-safe, >=3:1) against the #111113 card surface.
-export const CATEGORICAL = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
-export const OTHER = "#5f5e5a";
+// Design tokens shared by every page and chart (neo-brutalist theme).
+// Categorical slots are validated (CVD-safe adjacent pairs) against the #FFFDF8 card surface;
+// three slots sit below 3:1 contrast, so every multi-series chart carries visible labels.
+export const CATEGORICAL = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"];
+export const OTHER = "#a8a297";
 
 // Color follows the entity, never its rank: each language owns a fixed slot.
 const LANGUAGE_SLOTS = ["python", "javascript", "typescript", "go", "java", "rust", "php", "ruby"];
@@ -10,21 +11,22 @@ export const languageColor = (lang) => {
   return i >= 0 ? CATEGORICAL[i] : OTHER;
 };
 
-// Status palette — reserved for severity, always shown with a label.
+// Status palette — reserved for severity. Rendered as filled blocks with ink text + icon + label.
 export const SEVERITY = {
-  critical: { color: "#d03b3b", label: "Critical" },
-  high: { color: "#ec835a", label: "High" },
-  medium: { color: "#fab219", label: "Medium" },
-  low: { color: "#898781", label: "Low" },
+  critical: { color: "#FF5A5F", label: "Critical" },
+  high: { color: "#FF9F43", label: "High" },
+  medium: { color: "#FFE14D", label: "Medium" },
+  low: { color: "#DCD5C8", label: "Low" },
 };
 export const SEVERITY_ORDER = ["critical", "high", "medium", "low"];
 
+// Grade stickers: flat fill + ink text, tilted a little.
 export const GRADE = {
-  A: { color: "#00E599", bg: "rgba(0,229,153,0.12)", vibe: "Locked in" },
-  B: { color: "#7dd3a8", bg: "rgba(125,211,168,0.12)", vibe: "Solid" },
-  C: { color: "#fab219", bg: "rgba(250,178,25,0.12)", vibe: "Mid — needs work" },
-  D: { color: "#ec835a", bg: "rgba(236,131,90,0.12)", vibe: "Risky" },
-  F: { color: "#d03b3b", bg: "rgba(208,59,59,0.14)", vibe: "Cooked" },
+  A: { color: "#7CF0B4", vibe: "Locked in", emoji: "🔒" },
+  B: { color: "#B8F35E", vibe: "Solid", emoji: "👍" },
+  C: { color: "#FFE14D", vibe: "Mid. Needs work", emoji: "😬" },
+  D: { color: "#FF9F43", vibe: "Risky", emoji: "⚠️" },
+  F: { color: "#FF5A5F", vibe: "Cooked", emoji: "🔥" },
 };
 export const gradeFor = (score) =>
   score == null ? null : score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : score >= 60 ? "D" : "F";
@@ -38,12 +40,16 @@ export const SCANNERS = {
   radon: { label: "Radon", blurb: "Complexity & maintainability" },
 };
 
-// Sequential ramp (one hue, dark -> bright) for the activity heatmap.
-export const ACTIVITY_RAMP = ["#1c1c20", "#0f4d3b", "#0a7a5a", "#05b37f", "#00E599"];
+// Sequential ramp (one hue, light -> dark) for the activity heatmap.
+export const ACTIVITY_RAMP = ["#ECE6DA", "#C4CEFF", "#8EA1FF", "#5F78FF", "#3B5BFF"];
 
 export const CHART = {
-  grid: "#232327",
-  axis: "#3a3a40",
-  muted: "#898781",
-  brand: "#00E599",
+  grid: "#E4DDD0",
+  axis: "#111111",
+  muted: "#4A463F",
+  brand: "#3B5BFF",
+  fill: "#FFE14D",
 };
+
+// Rotating sticker colors for decorative blocks (never for data).
+export const POP = ["#FFE14D", "#FF8AD8", "#B8F35E", "#C9B6FF", "#FF9F43", "#7CF0B4"];
