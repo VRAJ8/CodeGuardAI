@@ -8,7 +8,7 @@ from typing import Awaitable, Callable, Dict, List, Optional
 
 from .models import SEVERITIES, BugRisk, Finding, Metrics, ScanReport, SourceFile
 from .scanners.complexity import analyze_file
-from .scanners.dependencies import collect_dependencies, dependency_findings, enrich_with_osv
+from .scanners.dependencies import OSVUnavailable, collect_dependencies, dependency_findings, enrich_with_osv
 from .scanners.external import bandit_available, run_bandit, run_semgrep, semgrep_available
 from .scanners.patterns import scan_patterns
 from .scanners.secrets import scan_secrets
@@ -47,6 +47,7 @@ async def scan(
     progress = progress or _noop
     started = time.monotonic()
     scanners_run = ["patterns", "secrets", "radon"]
+    errors: List[str] = []  # engines that were requested but could not run
     use_bandit = use_bandit and bandit_available()
     use_semgrep = use_semgrep and semgrep_available()
 
@@ -68,8 +69,11 @@ async def scan(
     await progress("Resolving dependencies against OSV.dev", 55)
     deps = collect_dependencies(files)
     if deps and use_osv:
-        deps = await enrich_with_osv(deps)
-        scanners_run.append("osv")
+        try:
+            deps = await enrich_with_osv(deps)
+            scanners_run.append("osv")
+        except OSVUnavailable as e:
+            errors.append(f"osv: dependency audit did not run ({e})")
     findings += dependency_findings(deps, files)
 
     await progress("Measuring complexity & maintainability", 70)
@@ -103,5 +107,6 @@ async def scan(
         scanner_counts=dict(Counter(f.scanner for f in findings).most_common()),
         scanners_run=scanners_run,
         suppressed=suppressed,
+        errors=errors,
         duration_ms=int((time.monotonic() - started) * 1000),
     )

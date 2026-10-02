@@ -105,4 +105,5 @@ class ScanReport(BaseModel):
     scanner_counts: Dict[str, int]
     scanners_run: List[str] = Field(default_factory=list)
     suppressed: int = 0  # findings silenced by codeguard-ignore comments
+    errors: List[str] = Field(default_factory=list)  # requested engines that failed to run
     duration_ms: int = 0

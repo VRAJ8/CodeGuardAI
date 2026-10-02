@@ -25,7 +25,8 @@ def _table(report, use_color: bool) -> str:
     out = [f"{c(BOLD)}CodeGuard AI v{__version__}{c(RESET)}  "
            f"grade {c(BOLD)}{report.grade}{c(RESET)}  score {report.overall_score}/100  "
            f"{report.metrics.total_files} files · {report.metrics.total_lines:,} lines · {report.duration_ms} ms",
-           f"{c(DIM)}scanners: {', '.join(report.scanners_run)}{c(RESET)}", ""]
+           f"{c(DIM)}scanners: {', '.join(report.scanners_run)}{c(RESET)}"]
+    out += [f"{c(COLORS['high'])}error: {e}{c(RESET)}" for e in report.errors] + [""]
     for f in report.security_issues:
         loc = f"{f.file_path}:{f.line_number}" if f.line_number else f.file_path
         out.append(f"  {c(COLORS[f.severity])}{f.severity.upper():<8}{c(RESET)} {f.type}")
@@ -77,6 +78,12 @@ def main(argv=None) -> int:
         print(text)
 
     if args.fail_on != "none":
+        if report.errors:
+            # Fail closed: a gate whose audit did not run must not report a pass.
+            for e in report.errors:
+                print(f"codeguard: {e}; failing because --fail-on is set (use --offline to skip OSV explicitly)",
+                      file=sys.stderr)
+            return 2
         threshold = SEVERITIES.index(args.fail_on)
         if any(SEVERITIES.index(f.severity) <= threshold for f in report.security_issues):
             return 1

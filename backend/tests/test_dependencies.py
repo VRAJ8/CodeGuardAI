@@ -5,7 +5,7 @@ import pytest
 
 from codeguard.models import Dependency, SourceFile
 from codeguard.scanners.dependencies import (
-    collect_dependencies, cvss3_base_score, dependency_findings, enrich_with_osv, parse_go_mod,
+    OSVUnavailable, collect_dependencies, cvss3_base_score, dependency_findings, enrich_with_osv, parse_go_mod,
     parse_requirements, parse_vuln,
 )
 
@@ -92,7 +92,14 @@ async def test_enrich_with_osv_uses_batch_api():
 
 
 @pytest.mark.asyncio
-async def test_osv_outage_is_non_fatal():
+async def test_osv_outage_is_reported_not_treated_as_clean():
     deps = [Dependency(name="lodash", version="4.17.11", ecosystem="npm", manifest="package.json")]
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(503))) as client:
-        assert (await enrich_with_osv(deps, client))[0].vulnerabilities == []
+        with pytest.raises(OSVUnavailable):
+            await enrich_with_osv(deps, client)
+
+
+def test_requirements_keep_packages_named_http_something():
+    names = [d.name for d in parse_requirements(
+        "httpx==0.28.1\nhttplib2==0.10.0\nhttps://example.com/pkg.whl\ngit+https://x/y.git\n-r base.txt\n", "r.txt")]
+    assert names == ["httpx", "httplib2"]

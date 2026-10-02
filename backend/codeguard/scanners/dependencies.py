@@ -49,7 +49,7 @@ def parse_requirements(content: str, path: str) -> List[Dependency]:
     deps = []
     for raw in content.splitlines():
         line = raw.split("#")[0].strip()
-        if not line or line.startswith(("-", "git+", "http")):
+        if not line or line.startswith(("-", "git+")) or "://" in line:  # options, VCS and URL requirements
             continue
         m = re.match(r"^([A-Za-z0-9_.\-]+)(\[[^\]]*\])?\s*(==|>=|~=|<=|>|<)?\s*([^;,\s]*)", line)
         if m:
@@ -159,6 +159,10 @@ def parse_vuln(detail: dict, dep: Dependency) -> Vulnerability:
 
 # ---------------------------------------------------------------- OSV lookup
 
+class OSVUnavailable(Exception):
+    """The dependency audit could not run. Callers must not treat this as 'no vulnerabilities'."""
+
+
 async def enrich_with_osv(deps: List[Dependency], client: Optional[httpx.AsyncClient] = None) -> List[Dependency]:
     queryable = [d for d in deps if d.version]
     if not queryable:
@@ -191,6 +195,7 @@ async def enrich_with_osv(deps: List[Dependency], client: Optional[httpx.AsyncCl
             dep.vulnerabilities = [parse_vuln(details.get(v, {"id": v}), dep) for v in ids]
     except (httpx.HTTPError, ValueError) as e:
         log.warning("OSV lookup failed: %s", e)
+        raise OSVUnavailable(str(e) or type(e).__name__) from e
     finally:
         if own_client:
             await client.aclose()

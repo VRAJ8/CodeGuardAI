@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { gradeFor } from "@/lib/theme";
+import { severityCounts } from "@/lib/api";
 
 const SEV_RGB = { critical: [208, 59, 59], high: [214, 104, 60], medium: [190, 130, 0], low: [110, 110, 110] };
 const OWASP = {
@@ -15,7 +16,7 @@ export function exportPdf(analysis) {
   const doc = new jsPDF();
   const W = doc.internal.pageSize.getWidth();
   const grade = analysis.grade || gradeFor(analysis.overall_score);
-  const counts = analysis.severity_counts || {};
+  const counts = severityCounts(analysis); // derived from security_issues for legacy docs
 
   // Header band
   doc.setFillColor(12, 12, 14);

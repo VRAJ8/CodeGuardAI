@@ -107,9 +107,13 @@ export default function Dashboard() {
     const load = async () => {
       try {
         const [s, u] = await Promise.all([axios.get(`${API}/analysis/stats/dashboard`), axios.get(`${API}/auth/me`)]);
-        setStats(normalizeDashboard(s.data));
+        // Older APIs return a slim summary; rebuild the widgets from the full scan list instead.
+        const legacy = !Array.isArray(s.data?.owasp) && s.data?.total_analyses > 0;
+        const history = legacy ? (await axios.get(`${API}/analysis/list`)).data : undefined;
+        const next = normalizeDashboard(s.data, history);
+        setStats(next);
         setUser(u.data);
-        if (s.data.running > 0) timer = setTimeout(load, 4000);
+        if (next.running > 0) timer = setTimeout(load, 4000);
       } catch {
         toast.error("Couldn't load your dashboard");
         setStats((prev) => prev || normalizeDashboard({}));

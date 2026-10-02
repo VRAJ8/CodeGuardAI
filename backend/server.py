@@ -237,6 +237,7 @@ async def run_pipeline(analysis_id: str, user_id: str, name: str, source_url: Op
             "scanner_counts": report.scanner_counts,
             "scanners_run": report.scanners_run,
             "suppressed": report.suppressed,
+            "scan_errors": report.errors,
             "duration_ms": report.duration_ms,
             "repo_meta": repo_meta,
             "baseline": baseline,

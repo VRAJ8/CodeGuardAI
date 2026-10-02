@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import AppShell from "@/components/AppShell";
 import { Delta, EmptyState, GradeSticker, SeverityBadge, SeverityBar, Spinner } from "@/components/viz";
-import { API, BACKEND_URL, compact, downloadFromApi, severityCounts, timeAgo } from "@/lib/api";
+import { API, BACKEND_URL, compact, downloadFromApi, normalizeAnalysis, severityCounts, timeAgo } from "@/lib/api";
 import { exportPdf } from "@/lib/report";
 import { GRADE, SCANNERS, SEVERITY_ORDER, gradeFor, languageColor } from "@/lib/theme";
 
@@ -178,7 +178,13 @@ function DependenciesTab({ analysis }) {
   const [vulnOnly, setVulnOnly] = useState(true);
   const vulnerable = deps.filter((d) => d.vulnerabilities?.length);
   const rows = (vulnOnly && vulnerable.length ? vulnerable : deps).slice().sort((a, b) => (b.vulnerabilities?.length || 0) - (a.vulnerabilities?.length || 0));
-  if (!deps.length) return <EmptyState icon={Package} title="No dependency manifests found" body="We read package.json, requirements*.txt and go.mod." />;
+  if (!deps.length) {
+    const osvFindings = (analysis.security_issues || []).filter((i) => i.scanner === "osv").length;
+    return osvFindings
+      ? <EmptyState icon={Package} title="Dependency inventory needs a re-scan"
+                    body={`This scan predates the SBOM engine. Its ${osvFindings} vulnerable-dependency finding(s) are under Findings; re-scan for the full package table.`} />
+      : <EmptyState icon={Package} title="No dependency manifests found" body="We read package.json, requirements*.txt and go.mod." />;
+  }
   return (
     <div className="card overflow-hidden">
       <div className="p-4 border-b-[2.5px] border-ink flex flex-wrap items-center justify-between gap-3 bg-cream/50">
@@ -249,9 +255,11 @@ function HealthTab({ analysis }) {
           <div className="mt-3 h-4 rounded-full border-2 border-ink bg-snow p-[2px]"><div className="h-full rounded-full bg-ink" style={{ width: `${m.maintainability_index || 0}%` }} /></div>
         </div>
         <div className="card p-5 bg-lilac">
-          <div className="eyebrow !text-ink">Avg cyclomatic complexity</div>
+          <div className="eyebrow !text-ink">{analysis.legacy ? "Avg file risk (legacy scan)" : "Avg cyclomatic complexity"}</div>
           <div className="mt-2 font-display text-5xl font-extrabold tabular">{(m.avg_complexity || 0).toFixed(1)}</div>
-          <div className="mt-2 text-[13px] font-semibold">per function · ≤5 is great, &gt;10 is spicy 🌶️</div>
+          <div className="mt-2 text-[13px] font-semibold">
+            {analysis.legacy ? "0–100 heuristic from the old engine · re-scan for Radon metrics" : <>per function · ≤5 is great, &gt;10 is spicy 🌶️</>}
+          </div>
         </div>
         <div className="card p-5">
           <div className="eyebrow">Languages</div>
@@ -350,6 +358,7 @@ function CodeCard({ title, body, code, bg = "bg-snow" }) {
 }
 
 function ShipTab({ analysis }) {
+  const [badgeOk, setBadgeOk] = useState(true);
   const badgeUrl = `${BACKEND_URL}/api/badge/${analysis.analysis_id}.svg`;
   const badgeMd = `[![CodeGuard](${badgeUrl})](${window.location.href})`;
   const workflow = `# .github/workflows/codeguard.yml
@@ -378,14 +387,14 @@ python -m codeguard scan /path/to/repo --format sarif -o codeguard.sarif`;
     <div className="grid xl:grid-cols-2 gap-5">
       <CodeCard bg="bg-yel" title="Block risky PRs" body="Fails CI on high-severity findings and publishes them to GitHub's Security tab." code={workflow} />
       <div className="space-y-5">
-        <div className="card p-5 bg-pink">
+        {badgeOk && <div className="card p-5 bg-pink">
           <div className="font-display text-lg font-extrabold">README badge</div>
           <div className="text-[13px] mt-0.5">Show off your grade. The badge reveals only this scan's grade and score.</div>
           <div className="mt-4 p-4 rounded-[10px] border-2 border-ink bg-snow flex flex-wrap items-center justify-between gap-3">
-            <img src={badgeUrl} alt="CodeGuard badge" className="h-5" />
+            <img src={badgeUrl} alt="CodeGuard badge" className="h-5" onError={() => setBadgeOk(false)} />
             <CopyButton text={badgeMd} label="Copy markdown" dark />
           </div>
-        </div>
+        </div>}
         <CodeCard bg="bg-lime" title="Run it locally" body="Same engine as this dashboard, as a CLI." code={cli} />
         <div className="card p-5 flex flex-wrap gap-2">
           <button className="btn-secondary btn-sm" onClick={() => downloadFromApi(`/analysis/${analysis.analysis_id}/sarif`, `${analysis.name}.sarif`)}>
@@ -420,7 +429,7 @@ export default function AnalysisDetail() {
     let cancelled = false;
     const load = async () => {
       try {
-        const { data } = await axios.get(`${API}/analysis/${id}`);
+        const data = normalizeAnalysis((await axios.get(`${API}/analysis/${id}`)).data);
         if (cancelled) return;
         setAnalysis(data);
         if (data.status === "processing") {
@@ -440,12 +449,17 @@ export default function AnalysisDetail() {
 
   const counts = useMemo(() => severityCounts(analysis), [analysis]);
 
+  const [rescanning, setRescanning] = useState(false);
   const rescan = async () => {
+    if (rescanning) return;
+    setRescanning(true);
     try {
       const { data } = await axios.post(`${API}/analysis/github`, { github_url: analysis.source_url, name: analysis.name });
       navigate(`/analysis/${data.analysis_id}`);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Couldn't start re-scan");
+    } finally {
+      setRescanning(false);
     }
   };
 
@@ -468,7 +482,7 @@ export default function AnalysisDetail() {
         <div className="max-w-xl mx-auto py-10">
           <EmptyState icon={XCircle} title="Scan failed 💀" body={analysis.error || analysis.ai_summary || "Something went wrong."}
             action={<div className="flex justify-center gap-2">
-              {analysis.source_url && <button className="btn-primary" onClick={rescan}><RefreshCw className="w-4 h-4" strokeWidth={2.5} /> Retry</button>}
+              {analysis.source_url && <button className="btn-primary" onClick={rescan} disabled={rescanning}><RefreshCw className={`w-4 h-4 ${rescanning ? "animate-spin" : ""}`} strokeWidth={2.5} /> {rescanning ? "Starting…" : "Retry"}</button>}
               <button className="btn-secondary" onClick={() => navigate("/new-analysis")}>New scan</button>
             </div>} />
         </div>
@@ -479,14 +493,16 @@ export default function AnalysisDetail() {
   const grade = analysis.grade || gradeFor(analysis.overall_score);
   const g = GRADE[grade] || {};
   const m = analysis.metrics || {};
-  const vulnDeps = (analysis.dependencies || []).filter((d) => d.vulnerabilities?.length).length;
+  const vulnDeps = analysis.dependencies?.length
+    ? analysis.dependencies.filter((d) => d.vulnerabilities?.length).length
+    : (analysis.security_issues || []).filter((i) => i.scanner === "osv").length;
   const secrets = (analysis.security_issues || []).filter((i) => i.scanner === "secrets").length;
   const tabCount = { findings: analysis.security_issues?.length, deps: vulnDeps || undefined, health: analysis.bug_risks?.length };
 
   const actions = (
     <>
       {analysis.source_url && (
-        <button className="btn-ghost btn-sm hidden sm:inline-flex" onClick={rescan}><RefreshCw className="w-4 h-4" strokeWidth={2.5} /> Re-scan</button>
+        <button className="btn-ghost btn-sm hidden sm:inline-flex" onClick={rescan} disabled={rescanning}><RefreshCw className={`w-4 h-4 ${rescanning ? "animate-spin" : ""}`} strokeWidth={2.5} /> {rescanning ? "Scanning…" : "Re-scan"}</button>
       )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -557,6 +573,11 @@ export default function AnalysisDetail() {
             ))}
           </div>
         </div>
+        {analysis.scan_errors?.length > 0 && (
+          <div className="mt-6 p-3 rounded-[10px] border-2 border-ink bg-tang text-[13px] font-semibold">
+            {analysis.scan_errors.map((e) => <div key={e}>⚠️ {e}. Results may be incomplete; re-scan to retry.</div>)}
+          </div>
+        )}
         {analysis.scanners_run && (
           <div className="mt-6 pt-5 border-t-2 border-ink flex flex-wrap items-center gap-2">
             <span className="eyebrow mr-1">Engines</span>

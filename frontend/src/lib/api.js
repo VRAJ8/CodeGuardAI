@@ -59,65 +59,114 @@ const OWASP_CODES = [
 
 const scoreGrade = (s) => (s == null ? null : s >= 90 ? "A" : s >= 80 ? "B" : s >= 70 ? "C" : s >= 60 ? "D" : "F");
 
-/** Ensure an analysis (list item or detail) has grade, severity_counts and issue_count. */
+// v2 findings have no `scanner`; infer it from the v2 scanners' fixed `type` strings.
+const inferScanner = (i) =>
+  i.scanner || (/secret/i.test(i.type || "") ? "secrets" : /^vulnerable dependency/i.test(i.type || "") ? "osv" : "patterns");
+
+/** Ensure an analysis (list item or detail) has grade, severity_counts, issue_count and per-issue scanner. */
 export function normalizeAnalysis(a) {
   if (!a) return a;
+  const issues = a.security_issues ? a.security_issues.map((i) => (i.scanner ? i : { ...i, scanner: inferScanner(i) })) : a.security_issues;
+  const withIssues = issues ? { ...a, security_issues: issues } : a;
   return {
-    ...a,
+    ...withIssues,
+    legacy: !a.engine_version,
     grade: a.grade || scoreGrade(a.overall_score),
-    severity_counts: severityCounts(a),
-    issue_count: a.issue_count ?? (a.security_issues || []).length,
+    severity_counts: severityCounts(withIssues),
+    issue_count: a.issue_count ?? (issues || []).length,
+    error: a.error || (a.status === "failed" ? a.ai_summary : undefined),
   };
 }
 
-export function normalizeDashboard(raw) {
-  const s = raw || {};
-  const recent = (s.recent_analyses || []).map(normalizeAnalysis);
-  const completed = recent.filter((a) => (a.status || "completed") === "completed" && a.overall_score != null);
-  const legacy = !Array.isArray(s.owasp);
+const newestFirst = (xs) => xs.slice().sort((x, y) => String(y.created_at || "").localeCompare(String(x.created_at || "")));
+const daysAgo = (n) => { const d = new Date(); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
 
-  const severity = s.severity || completed.reduce((acc, a) => {
-    Object.entries(a.severity_counts).forEach(([k, n]) => { acc[k] = (acc[k] || 0) + n; });
-    return acc;
-  }, { critical: 0, high: 0, medium: 0, low: 0 });
+/**
+ * Mirror of the v3 server's build_dashboard, used only when the API predates it. `history` is the full
+ * GET /analysis/list payload (v2 returns complete docs, which is all we need to aggregate client-side).
+ */
+function aggregateLegacy(docs) {
+  const all = newestFirst(docs.map(normalizeAnalysis));
+  const completed = all.filter((a) => (a.status || "completed") === "completed" && a.overall_score != null);
+  const latest = new Map();
+  completed.forEach((a) => { const k = a.source_url || a.name; if (!latest.has(k)) latest.set(k, a); });
+  const projects = [...latest.values()];
 
-  const byDay = {};
-  recent.forEach((a) => { const d = (a.created_at || "").slice(0, 10); if (d) byDay[d] = (byDay[d] || 0) + 1; });
-  const today = new Date();
-  const activity = s.activity || Array.from({ length: 28 }, (_, i) => {
-    const d = new Date(today);
-    d.setUTCDate(d.getUTCDate() - (27 - i));
-    const key = d.toISOString().slice(0, 10);
-    return { date: key, count: byDay[key] || 0 };
-  });
+  const severity = { critical: 0, high: 0, medium: 0, low: 0 };
+  const scanners = {};
+  let secrets = 0;
+  let vulnDeps = 0;
+  projects.forEach((a) => (a.security_issues || []).forEach((i) => {
+    severity[i.severity] = (severity[i.severity] || 0) + 1;
+    scanners[i.scanner] = (scanners[i.scanner] || 0) + 1;
+    if (i.scanner === "secrets") secrets += 1;
+    if (i.scanner === "osv") vulnDeps += 1;
+  }));
 
-  const posture = s.posture_score ?? s.avg_score ?? 0;
+  const perDay = {};
+  all.forEach((a) => { const d = String(a.created_at || "").slice(0, 10); if (d) perDay[d] = (perDay[d] || 0) + 1; });
+  const activity = Array.from({ length: 28 }, (_, i) => ({ date: daysAgo(27 - i), count: perDay[daysAgo(27 - i)] || 0 }));
+  let streak = 0;
+  for (let i = activity.length - 1; i >= 0; i--) {
+    if (activity[i].count === 0) { if (streak === 0 && i === activity.length - 1) continue; break; }
+    streak += 1;
+  }
+  const avg = (xs) => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : 0);
+  const languages = {};
+  projects.forEach((a) => Object.entries(a.metrics?.languages || {}).forEach(([k, n]) => { languages[k] = (languages[k] || 0) + n; }));
+
   return {
-    ...s,
-    legacy,
-    total_analyses: s.total_analyses || 0,
-    projects: s.projects ?? new Set(completed.map((a) => a.source_url || a.name)).size,
-    running: s.running || 0,
-    avg_score: s.avg_score || 0,
-    posture_score: posture,
-    posture_grade: s.posture_grade || (s.total_analyses ? scoreGrade(posture) : null),
-    score_delta_7d: s.score_delta_7d ?? null,
-    total_issues: s.total_issues || 0,
+    total_analyses: completed.length,
+    projects: projects.length,
+    running: all.filter((a) => a.status === "processing").length,
+    avg_score: avg(completed.map((a) => a.overall_score)),
+    posture_score: avg(projects.map((a) => a.overall_score)),
+    total_issues: Object.values(severity).reduce((a, b) => a + b, 0),
     severity,
-    secrets: s.secrets ?? completed.reduce((n, a) => n + (a.security_issues || []).filter((i) =>
-      i.scanner === "secrets" || /secret/i.test(i.type || "")).length, 0),
-    vulnerable_dependencies: s.vulnerable_dependencies ?? 0,
-    total_dependencies: s.total_dependencies ?? 0,
-    lines_scanned: s.lines_scanned ?? completed.reduce((n, a) => n + (a.metrics?.total_lines || 0), 0),
-    fixed_total: s.fixed_total ?? 0,
-    owasp: legacy ? OWASP_CODES.map(([code, name]) => ({ code, name, count: 0 })) : s.owasp,
-    scanners: s.scanners || {},
-    languages: s.languages || {},
-    trend: s.trend || completed.slice().reverse().map((a) => ({ date: a.created_at, score: a.overall_score, name: a.name, grade: a.grade })),
+    secrets,
+    vulnerable_dependencies: vulnDeps,
+    lines_scanned: completed.reduce((n, a) => n + (a.metrics?.total_lines || 0), 0),
+    scanners,
+    languages,
+    trend: completed.slice(0, 30).reverse().map((a) => ({ date: a.created_at, score: a.overall_score, name: a.name, grade: a.grade })),
     activity,
-    streak: s.streak ?? 0,
-    riskiest: s.riskiest || completed.slice().sort((x, y) => x.overall_score - y.overall_score).slice(0, 5)
+    streak,
+    riskiest: projects.slice().sort((x, y) => x.overall_score - y.overall_score).slice(0, 5)
       .map((a) => ({ analysis_id: a.analysis_id, name: a.name, score: a.overall_score, grade: a.grade, severity: a.severity_counts })),
-    recent_analyses: recent,
+    recent_analyses: all.slice(0, 6),
+  };
+}
+
+/** Accept a v3 dashboard payload as-is, or rebuild it from the v2 payload plus the full scan list. */
+export function normalizeDashboard(raw, history) {
+  const s = raw || {};
+  const legacy = !Array.isArray(s.owasp);
+  const base = legacy ? aggregateLegacy(history || s.recent_analyses || []) : s;
+  const posture = base.posture_score ?? 0;
+  return {
+    ...base,
+    legacy,
+    total_analyses: base.total_analyses || 0,
+    projects: base.projects || 0,
+    running: base.running || 0,
+    avg_score: base.avg_score || 0,
+    posture_score: posture,
+    posture_grade: base.posture_grade || (base.total_analyses ? scoreGrade(posture) : null),
+    score_delta_7d: base.score_delta_7d ?? null,
+    total_issues: base.total_issues || 0,
+    severity: base.severity || { critical: 0, high: 0, medium: 0, low: 0 },
+    secrets: base.secrets || 0,
+    vulnerable_dependencies: base.vulnerable_dependencies || 0,
+    total_dependencies: base.total_dependencies || 0,
+    lines_scanned: base.lines_scanned || 0,
+    fixed_total: base.fixed_total || 0,
+    owasp: legacy ? OWASP_CODES.map(([code, name]) => ({ code, name, count: 0 })) : base.owasp,
+    scanners: base.scanners || {},
+    languages: base.languages || {},
+    trend: base.trend || [],
+    activity: base.activity || [],
+    streak: base.streak || 0,
+    riskiest: base.riskiest || [],
+    recent_analyses: (base.recent_analyses || []).map(normalizeAnalysis),
   };
 }

@@ -115,6 +115,33 @@ def test_cli_exit_codes_and_sarif_output(tmp_path, capsys, vulnerable_app):
     assert "grade A" in capsys.readouterr().out
 
 
+def _osv_down(monkeypatch, tmp_path):
+    import codeguard.engine as engine
+    from codeguard.scanners.dependencies import OSVUnavailable
+
+    async def down(deps, client=None):
+        raise OSVUnavailable("503 Service Unavailable")
+
+    monkeypatch.setattr(engine, "enrich_with_osv", down)
+    (tmp_path / "package.json").write_text('{"dependencies": {"jspdf": "4.1.0"}}')
+
+
+@pytest.mark.asyncio
+async def test_osv_outage_is_surfaced_in_the_report(tmp_path, monkeypatch):
+    _osv_down(monkeypatch, tmp_path)
+    report = await scan(load_directory(str(tmp_path)), use_bandit=False, use_semgrep=False)
+    assert "osv" not in report.scanners_run
+    assert report.errors and "dependency audit did not run" in report.errors[0]
+
+
+def test_osv_outage_fails_the_cli_gate_closed(tmp_path, monkeypatch, capsys):
+    _osv_down(monkeypatch, tmp_path)
+    assert cli.main(["scan", str(tmp_path), "--no-bandit", "--no-semgrep"]) == 2
+    assert "failing because --fail-on is set" in capsys.readouterr().err
+    assert cli.main(["scan", str(tmp_path), "--no-bandit", "--no-semgrep", "--fail-on", "none"]) == 0
+    assert cli.main(["scan", str(tmp_path), "--no-bandit", "--no-semgrep", "--offline"]) == 0
+
+
 def test_cli_exclude(tmp_path):
     (tmp_path / "fixtures").mkdir()
     (tmp_path / "fixtures" / "bad.js").write_text("eval(x)\n")
