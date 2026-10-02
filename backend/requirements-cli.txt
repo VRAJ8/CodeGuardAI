@@ -1,0 +1,5 @@
+# Minimal deps for `python -m codeguard scan` (GitHub Action / CI)
+httpx==0.28.1
+pydantic==2.12.5
+bandit==1.9.4
+radon==6.0.1

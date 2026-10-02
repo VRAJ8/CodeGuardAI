@@ -1,0 +1,33 @@
+# Full local stack:  docker compose up --build   ->  http://localhost:3000
+services:
+  mongo:
+    image: mongo:7
+    volumes: [mongo-data:/data/db]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      retries: 5
+
+  api:
+    build: ./backend
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: codeguard
+      ALLOW_DEV_LOGIN: "true"   # passwordless "Dev login" button — local use only
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    ports: ["8000:8000"]
+    depends_on:
+      mongo: { condition: service_healthy }
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_BACKEND_URL: http://localhost:8000
+        REACT_APP_DEV_LOGIN: "true"
+    ports: ["3000:80"]
+    depends_on: [api]
+
+volumes:
+  mongo-data:
