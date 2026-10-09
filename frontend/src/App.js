@@ -20,6 +20,13 @@ const FullscreenSpinner = ({ label }) => (
   </div>
 );
 
+// No HTTP response at all means the browser never reached the API (offline, still waking, wrong URL).
+const signInError = (err) => {
+  const detail = err.response?.data?.detail;
+  if (!err.response) return "Can't reach the CodeGuard API. The server may be offline or still starting, so try again in a minute.";
+  return typeof detail === "string" ? detail.slice(0, 200) : `The API answered with HTTP ${err.response.status}.`;
+};
+
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
 const AuthCallback = () => {
   const navigate = useNavigate();
@@ -40,8 +47,8 @@ const AuthCallback = () => {
         toast.success(`Welcome, ${res.data.name?.split(" ")[0] || "dev"} 👋`);
         navigate("/dashboard", { state: { user: res.data }, replace: true });
       })
-      .catch(() => {
-        toast.error("Authentication failed");
+      .catch((err) => {
+        toast.error("Sign-in failed", { description: signInError(err), duration: 10000 });
         navigate("/", { replace: true });
       });
   }, [location, navigate]);

@@ -127,7 +127,7 @@ The suite covers every scanner, CVSS math checked against FIRST.org reference ve
 | `MONGO_URL`, `DB_NAME` | MongoDB connection |
 | `GROQ_API_KEY` | Enables AI triage (`EMERGENT_LLM_KEY` still accepted); `AI_MODEL`, `AI_BASE_URL` to swap models/providers |
 | `GITHUB_TOKEN` | Raises the GitHub API limit from 60/h; allows private repos the token can read |
-| `ENV=prod`, `CORS_ORIGINS` | Restrict CORS to listed origins |
+| `CORS_ORIGINS` | Comma-separated frontend origins allowed to call the API with the session cookie (default: `localhost:3000` and `codevigil.netlify.app`). `*` is ignored, since it would let any site read signed-in users' data |
 | `ALLOW_DEV_LOGIN` | Passwordless local login. **Never enable in production** |
 | `CODEGUARD_MAX_FILES` | Max files per scan (default 400) |
 

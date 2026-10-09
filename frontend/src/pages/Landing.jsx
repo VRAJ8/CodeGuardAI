@@ -48,9 +48,16 @@ function Marquee() {
 export default function Landing() {
   const navigate = useNavigate();
   const [checking, setChecking] = useState(true);
+  const [apiDown, setApiDown] = useState(false);
 
   useEffect(() => {
-    axios.get(`${API}/auth/me`).then(() => navigate("/dashboard")).catch(() => setChecking(false));
+    let done = false;
+    // Never hold the landing page behind a slow API; a signed-in visitor still gets redirected when it answers.
+    const reveal = setTimeout(() => setChecking(false), 2500);
+    axios.get(`${API}/auth/me`)
+      .then(() => { if (!done) navigate("/dashboard"); })
+      .catch((err) => { if (!done) { setApiDown(!err.response); setChecking(false); } });
+    return () => { done = true; clearTimeout(reveal); };
   }, [navigate]);
 
   // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
@@ -83,6 +90,11 @@ export default function Landing() {
             <button className="btn-dark btn-sm" onClick={handleLogin} data-testid="login-btn">Get started</button>
           </div>
         </div>
+        {apiDown && (
+          <div role="status" className="border-t-[2.5px] border-ink bg-tang px-4 py-2 text-center text-sm font-bold">
+            Heads up: the CodeGuard API isn't responding right now, so sign-in will fail until it's back.
+          </div>
+        )}
       </nav>
 
       {/* Hero */}

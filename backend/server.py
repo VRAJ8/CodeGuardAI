@@ -5,6 +5,7 @@ client polls GET /api/analysis/{id} for `status` + `progress`.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
@@ -20,6 +21,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, File, HTTPExce
 from fastapi.responses import JSONResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
+from pymongo.errors import PyMongoError
 from starlette.middleware.cors import CORSMiddleware
 
 from codeguard import __version__
@@ -38,7 +40,9 @@ load_dotenv(ROOT_DIR / ".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("codeguard")
 
-client = AsyncIOMotorClient(os.environ.get("MONGO_URL", "mongodb://localhost:27017"))
+# Fail fast when Mongo is unreachable (motor's default is 30s), so a login hits a clear 503, not a hang.
+client = AsyncIOMotorClient(os.environ.get("MONGO_URL", "mongodb://localhost:27017"),
+                            serverSelectionTimeoutMS=int(os.environ.get("MONGO_TIMEOUT_MS", "8000")))
 db = client[os.environ.get("DB_NAME", "codeguard")]
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -147,14 +151,25 @@ async def create_session(request: Request, response: Response):
     session_id = (await request.json()).get("session_id")
     if not session_id:
         raise HTTPException(400, "session_id required")
-    async with httpx.AsyncClient(timeout=15) as http:
-        resp = await http.get("https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-                              headers={"X-Session-ID": session_id})
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            resp = await http.get("https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
+                                  headers={"X-Session-ID": session_id})
+    except httpx.HTTPError as e:
+        log.warning("sign-in provider unreachable: %s", e.__class__.__name__)
+        raise HTTPException(502, "The sign-in provider is unreachable. Try again in a minute.") from None
     if resp.status_code != 200:
-        raise HTTPException(401, "Invalid session_id")
-    data = resp.json()
-    return await _start_session(response, data.get("email"), data.get("name"), data.get("picture"),
-                                data.get("session_token"))
+        log.warning("sign-in provider rejected the session: HTTP %s", resp.status_code)
+        raise HTTPException(401, "Your sign-in session expired or was rejected. Please sign in again.")
+    try:
+        data = resp.json()
+    except ValueError:
+        data = None
+    if not isinstance(data, dict) or not data.get("email") or not data.get("session_token"):
+        log.warning("sign-in provider returned an incomplete profile")
+        raise HTTPException(502, "The sign-in provider returned an incomplete profile. Please try again.")
+    return await _start_session(response, data["email"], data.get("name") or data["email"], data.get("picture"),
+                                data["session_token"])
 
 
 @auth_router.post("/dev-login")
@@ -554,21 +569,52 @@ async def root():
     return {"message": "CodeGuard AI API", "version": __version__}
 
 
+async def _database_ok() -> bool:
+    try:
+        await asyncio.wait_for(db.command("ping"), timeout=3)
+        return True
+    except Exception as e:  # unreachable, auth failure, paused cluster, timeout
+        log.warning("database ping failed: %s", e.__class__.__name__)
+        return False
+
+
 @api_router.get("/health")
 async def health():
+    # Always 200 so a host's health check doesn't restart-loop the API over a database outage;
+    # "database": false is the signal that logins and scans will fail.
+    database = await _database_ok()
     return {
-        "status": "healthy", "version": __version__,
+        "status": "healthy" if database else "degraded", "version": __version__, "database": database,
         "engines": {"patterns": True, "secrets": True, "radon": True, "osv": True,
                     "bandit": bandit_available(), "semgrep": semgrep_available(), "ai": ai_enabled()},
     }
+
+
+@app.exception_handler(PyMongoError)
+async def database_unavailable(_request: Request, exc: PyMongoError):
+    # Registered handlers run inside CORSMiddleware, so the browser can read this instead of an opaque 500.
+    log.error("database error: %s", exc.__class__.__name__)
+    return JSONResponse({"detail": "The database is unavailable right now. Try again in a minute."}, status_code=503)
 
 
 app.include_router(api_router)
 app.include_router(auth_router)
 app.include_router(analysis_router)
 
-DEFAULT_ORIGINS = "http://localhost:3000,https://codevigil.netlify.app"
-origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", DEFAULT_ORIGINS).split(",") if o.strip()]
+DEFAULT_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000,https://codevigil.netlify.app"
+
+
+def cors_origins(raw: Optional[str]) -> List[str]:
+    """Explicit allow-list in every environment: sessions are SameSite=None cookies, so any allowed
+    origin can read a signed-in visitor's data. "*" is dropped because Starlette answers credentialed
+    requests by echoing whatever Origin asked, which would let any website read users' scans; a list
+    that is only "*" (the old default) falls back to the defaults rather than locking the frontend out."""
+    listed = [o.strip().rstrip("/") for o in (raw or "").split(",") if o.strip() and o.strip() != "*"]
+    if raw and "*" in raw:
+        log.warning("CORS_ORIGINS '*' ignored: list the frontend origins explicitly")
+    return listed or DEFAULT_ORIGINS.split(",")
+
+
 # Opt-in pattern for preview deploys, e.g. ^https://deploy-preview-\d+--codevigil\.netlify\.app$
 # Credentialed CORS for previews means any deploy preview can call the API as the visitor, so only
 # enable it when previews are never built from untrusted (fork) pull requests.
@@ -576,8 +622,8 @@ origin_regex = os.environ.get("CORS_ORIGIN_REGEX") or None
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origin_regex=origin_regex if os.environ.get("ENV") == "prod" else None,
-    allow_origins=origins if os.environ.get("ENV") == "prod" else ["*"],
+    allow_origin_regex=origin_regex,
+    allow_origins=cors_origins(os.environ.get("CORS_ORIGINS")),
     allow_methods=["*"],
     allow_headers=["*"],
 )

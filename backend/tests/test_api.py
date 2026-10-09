@@ -251,3 +251,80 @@ def test_delete(api):
     aid = upload(api, fixture_zip())
     assert api.delete(f"/api/analysis/{aid}").status_code == 200
     assert api.get(f"/api/analysis/{aid}").status_code == 404
+
+
+# ---- sign-in exchange and CORS --------------------------------------------------------------------
+
+FRONTEND = "https://codevigil.netlify.app"
+
+
+def fake_provider(monkeypatch, status=200, body=None, error=None):
+    import httpx
+
+    async def get(self, url, **kw):
+        if error:
+            raise error
+        return httpx.Response(status, json=body if body is not None else {
+            "email": "ada@example.com", "name": "Ada", "picture": None, "session_token": "provider-token"})
+    monkeypatch.setattr(httpx.AsyncClient, "get", get)
+
+
+def exchange(c):
+    return c.post("/api/auth/session", json={"session_id": "sid"}, headers={"Origin": FRONTEND})
+
+
+def test_session_exchange_signs_in_and_is_readable_by_the_frontend(api, monkeypatch):
+    fake_provider(monkeypatch)
+    r = exchange(api)
+    assert r.status_code == 200 and r.json()["email"] == "ada@example.com"
+    assert r.headers["access-control-allow-origin"] == FRONTEND
+    assert api.get("/api/auth/me").json()["name"] == "Ada"
+
+
+@pytest.mark.parametrize("kwargs,status,detail", [
+    ({"status": 401, "body": {"detail": "bad"}}, 401, "expired or was rejected"),
+    ({"body": {"name": "No Email"}}, 502, "incomplete profile"),
+    ({"error": __import__("httpx").ConnectTimeout("timed out")}, 502, "unreachable"),
+])
+def test_session_exchange_failures_are_specific_and_browser_readable(api, monkeypatch, kwargs, status, detail):
+    fake_provider(monkeypatch, **kwargs)
+    r = exchange(api)
+    assert r.status_code == status and detail in r.json()["detail"]
+    assert r.headers["access-control-allow-origin"] == FRONTEND  # the UI can show the reason, not a CORS error
+
+
+def test_database_outage_is_a_readable_503(api, monkeypatch):
+    from pymongo.errors import ServerSelectionTimeoutError
+
+    async def down(*a, **kw):
+        raise ServerSelectionTimeoutError("cluster paused")
+    fake_provider(monkeypatch)
+    # mongomock hands out a fresh wrapper per attribute access, so patch the classes
+    monkeypatch.setattr(type(server.db.users), "find_one", down)
+    monkeypatch.setattr(type(server.db), "command", down)
+    r = exchange(api)
+    assert r.status_code == 503 and "database" in r.json()["detail"].lower()
+    assert r.headers["access-control-allow-origin"] == FRONTEND
+    body = api.get("/api/health").json()
+    assert body["database"] is False and body["status"] == "degraded"
+
+
+def test_health_reports_database(api):
+    body = api.get("/api/health").json()
+    assert body["database"] is True and body["status"] == "healthy"
+
+
+def test_cors_never_lets_other_sites_read_a_signed_in_users_data(api):
+    login(api)
+    evil = api.get("/api/analysis/list", headers={"Origin": "https://evil.example"})
+    assert "access-control-allow-origin" not in evil.headers
+    assert api.get("/api/analysis/list", headers={"Origin": FRONTEND}).headers["access-control-allow-origin"] == FRONTEND
+
+
+@pytest.mark.parametrize("raw,expected", [
+    (None, ["http://localhost:3000", "http://127.0.0.1:3000", "https://codevigil.netlify.app"]),
+    ("*", ["http://localhost:3000", "http://127.0.0.1:3000", "https://codevigil.netlify.app"]),  # v2-era value
+    ("https://a.app/, *, https://b.app", ["https://a.app", "https://b.app"]),
+])
+def test_cors_origins_are_always_explicit(raw, expected):
+    assert server.cors_origins(raw) == expected
