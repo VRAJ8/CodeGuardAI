@@ -38,6 +38,7 @@ export const SCANNERS = {
   secrets: { label: "Secrets", blurb: "Signatures + entropy" },
   patterns: { label: "Rule pack", blurb: "Cross-language patterns" },
   radon: { label: "Radon", blurb: "Complexity & maintainability" },
+  complexity: { label: "Complexity", blurb: "Decision-point heuristic (browser scans)" },
 };
 
 // Sequential ramp (one hue, light -> dark) for the activity heatmap.

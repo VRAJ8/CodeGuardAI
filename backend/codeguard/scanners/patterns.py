@@ -92,6 +92,8 @@ RULES: List[Rule] = [
 ]
 
 COMMENT_PREFIXES = ("#", "//", "*", "/*", "--")
+MAX_LINE = 1000  # longer lines (minified bundles) are not searched
+DESCRIPTION_CHARS, SNIPPET_CHARS = 140, 200
 
 
 def _is_comment(line: str) -> bool:
@@ -105,7 +107,7 @@ def scan_patterns(content: str, file_path: str, language: str, skip_bandit_overl
     if not rules:
         return findings
     for lineno, line in enumerate(content.split("\n"), 1):
-        if len(line) > 1000 or _is_comment(line):
+        if len(line) > MAX_LINE or _is_comment(line):
             continue
         for rule in rules:
             if rule.regex.search(line):
@@ -119,11 +121,11 @@ def _finding(rule: Rule, file_path: str, lineno: int, line: str, snippet: Option
         scanner="patterns",
         severity=rule.severity,
         type=rule.title,
-        description=f"Found: {line.strip()[:140]}",
+        description=f"Found: {line.strip()[:DESCRIPTION_CHARS]}",
         file_path=file_path,
         line_number=lineno,
         recommendation=rule.recommendation,
         cwe=rule.cwe,
         owasp=owasp_for_cwe(rule.cwe),
-        snippet=snippet or line.strip()[:200],
+        snippet=snippet or line.strip()[:SNIPPET_CHARS],
     ).with_fingerprint()

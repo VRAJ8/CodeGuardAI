@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
@@ -24,6 +24,14 @@ const OWASP_NAMES = {
   "A04:2021": "Insecure Design", "A05:2021": "Security Misconfiguration", "A06:2021": "Vulnerable Components",
   "A07:2021": "Auth Failures", "A08:2021": "Integrity Failures", "A09:2021": "Logging Failures", "A10:2021": "SSRF",
 };
+
+/** How the report's SARIF/SBOM buttons get their files: from the API by default; browser scans build them locally. */
+export const ReportExports = createContext({
+  sarif: (a) => downloadFromApi(`/analysis/${a.analysis_id}/sarif`, `${a.name}.sarif`),
+  sbom: (a) => downloadFromApi(`/analysis/${a.analysis_id}/sbom`, `${a.name}.cdx.json`),
+});
+
+const SOURCE_LABEL = { github: "GitHub", zip: "ZIP upload", files: "Folder / files" };
 
 function CopyButton({ text, label = "Copy", dark = false }) {
   const [done, setDone] = useState(false);
@@ -191,6 +199,7 @@ function FindingsTab({ analysis }) {
 }
 
 function DependenciesTab({ analysis }) {
+  const exports = useContext(ReportExports);
   const deps = analysis.dependencies || [];
   const [vulnOnly, setVulnOnly] = useState(true);
   const vulnerable = deps.filter((d) => d.vulnerabilities?.length);
@@ -209,7 +218,7 @@ function DependenciesTab({ analysis }) {
         <div className="flex flex-wrap gap-2">
           <button className={`chip ${vulnOnly ? "chip-active" : ""}`} onClick={() => setVulnOnly(true)}>Vulnerable</button>
           <button className={`chip ${!vulnOnly ? "chip-active" : ""}`} onClick={() => setVulnOnly(false)}>All packages</button>
-          <button className="btn-secondary btn-sm" onClick={() => downloadFromApi(`/analysis/${analysis.analysis_id}/sbom`, `${analysis.name}.cdx.json`)}>
+          <button className="btn-secondary btn-sm" onClick={() => exports.sbom(analysis)}>
             <Download className="w-3.5 h-3.5" strokeWidth={2.5} /> SBOM
           </button>
         </div>
@@ -375,7 +384,8 @@ function CodeCard({ title, body, code, bg = "bg-snow" }) {
 }
 
 function ShipTab({ analysis }) {
-  const [badgeOk, setBadgeOk] = useState(true);
+  const exports = useContext(ReportExports);
+  const [badgeOk, setBadgeOk] = useState(analysis.mode !== "browser"); // badges are served by the API
   const badgeUrl = `${BACKEND_URL}/api/badge/${analysis.analysis_id}.svg`;
   const badgeMd = `[![CodeGuard](${badgeUrl})](${window.location.href})`;
   const workflow = `# .github/workflows/codeguard.yml
@@ -414,10 +424,10 @@ python -m codeguard scan /path/to/repo --format sarif -o codeguard.sarif`;
         </div>}
         <CodeCard bg="bg-lime" title="Run it locally" body="Same engine as this dashboard, as a CLI." code={cli} />
         <div className="card p-5 flex flex-wrap gap-2">
-          <button className="btn-secondary btn-sm" onClick={() => downloadFromApi(`/analysis/${analysis.analysis_id}/sarif`, `${analysis.name}.sarif`)}>
+          <button className="btn-secondary btn-sm" onClick={() => exports.sarif(analysis)}>
             <Download className="w-3.5 h-3.5" strokeWidth={2.5} /> SARIF 2.1.0
           </button>
-          <button className="btn-secondary btn-sm" onClick={() => downloadFromApi(`/analysis/${analysis.analysis_id}/sbom`, `${analysis.name}.cdx.json`)}>
+          <button className="btn-secondary btn-sm" onClick={() => exports.sbom(analysis)}>
             <Download className="w-3.5 h-3.5" strokeWidth={2.5} /> CycloneDX SBOM
           </button>
         </div>
@@ -433,80 +443,10 @@ const TABS = [
   { key: "ship", label: "Ship it", icon: Rocket },
 ];
 
-export default function AnalysisDetail() {
-  const { id } = useParams();
-  const navigate = useNavigate();
-  const [analysis, setAnalysis] = useState(null);
+/** Hero, AI summary and tabs for one scan. Shared by API scans and browser scans (analysis.mode === "browser"). */
+export function ReportBody({ analysis }) {
   const [tab, setTab] = useState("findings");
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const timer = useRef();
-  const wasProcessing = useRef(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const data = normalizeAnalysis((await axios.get(`${API}/analysis/${id}`)).data);
-        if (cancelled) return;
-        setAnalysis(data);
-        if (data.status === "processing") {
-          wasProcessing.current = true;
-          timer.current = setTimeout(load, 1500);
-        } else if (data.status === "completed" && wasProcessing.current) {
-          toast.success(`Scan complete: grade ${data.grade} ${GRADE[data.grade]?.emoji || ""}`);
-        }
-      } catch {
-        toast.error("Analysis not found");
-        navigate("/dashboard");
-      }
-    };
-    load();
-    return () => { cancelled = true; clearTimeout(timer.current); };
-  }, [id, navigate]);
-
   const counts = useMemo(() => severityCounts(analysis), [analysis]);
-
-  const [rescanning, setRescanning] = useState(false);
-  const rescan = async () => {
-    if (rescanning) return;
-    setRescanning(true);
-    try {
-      const { data } = await axios.post(`${API}/analysis/github`, { github_url: analysis.source_url, name: analysis.name });
-      navigate(`/analysis/${data.analysis_id}`);
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Couldn't start re-scan");
-    } finally {
-      setRescanning(false);
-    }
-  };
-
-  const remove = async () => {
-    try {
-      await axios.delete(`${API}/analysis/${id}`);
-      toast.success("Scan deleted");
-      navigate("/history");
-    } catch {
-      toast.error("Delete failed");
-    }
-  };
-
-  if (!analysis) return <AppShell title="Scan"><Spinner /></AppShell>;
-  if (analysis.status === "processing") return <AppShell title={analysis.name}><ScanningView analysis={analysis} /></AppShell>;
-
-  if (analysis.status === "failed") {
-    return (
-      <AppShell title={analysis.name}>
-        <div className="max-w-xl mx-auto py-10">
-          <EmptyState icon={XCircle} title="Scan failed 💀" body={analysis.error || analysis.ai_summary || "Something went wrong."}
-            action={<div className="flex justify-center gap-2">
-              {analysis.source_url && <button className="btn-primary" onClick={rescan} disabled={rescanning}><RefreshCw className={`w-4 h-4 ${rescanning ? "animate-spin" : ""}`} strokeWidth={2.5} /> {rescanning ? "Starting…" : "Retry"}</button>}
-              <button className="btn-secondary" onClick={() => navigate("/new-analysis")}>New scan</button>
-            </div>} />
-        </div>
-      </AppShell>
-    );
-  }
-
   const grade = analysis.grade || gradeFor(analysis.overall_score);
   const g = GRADE[grade] || {};
   const m = analysis.metrics || {};
@@ -516,47 +456,16 @@ export default function AnalysisDetail() {
   const secrets = (analysis.security_issues || []).filter((i) => i.scanner === "secrets").length;
   const tabCount = { findings: analysis.security_issues?.length, deps: vulnDeps || undefined, health: analysis.bug_risks?.length };
 
-  const actions = (
-    <>
-      {analysis.source_url && (
-        <button className="btn-ghost btn-sm hidden sm:inline-flex" onClick={rescan} disabled={rescanning}><RefreshCw className={`w-4 h-4 ${rescanning ? "animate-spin" : ""}`} strokeWidth={2.5} /> {rescanning ? "Scanning…" : "Re-scan"}</button>
-      )}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button className="btn-primary btn-sm"><Download className="w-4 h-4" strokeWidth={2.5} /> Export</button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56 bg-snow border-[2.5px] border-ink shadow-brut rounded-[12px] p-1.5 text-ink font-semibold">
-          <DropdownMenuItem className="rounded-lg focus:bg-yel" onClick={() => { exportPdf(analysis); toast.success("PDF report generated"); }}><FileText className="w-4 h-4 mr-2" /> PDF audit report</DropdownMenuItem>
-          <DropdownMenuItem className="rounded-lg focus:bg-yel" onClick={() => downloadFromApi(`/analysis/${id}/sarif`, `${analysis.name}.sarif`)}><ShieldCheck className="w-4 h-4 mr-2" /> SARIF (Code Scanning)</DropdownMenuItem>
-          <DropdownMenuItem className="rounded-lg focus:bg-yel" onClick={() => downloadFromApi(`/analysis/${id}/sbom`, `${analysis.name}.cdx.json`)}><Package className="w-4 h-4 mr-2" /> CycloneDX SBOM</DropdownMenuItem>
-          <DropdownMenuSeparator className="bg-ink/20" />
-          <DropdownMenuItem className="rounded-lg focus:bg-yel" onClick={() => {
-            const url = URL.createObjectURL(new Blob([JSON.stringify(analysis, null, 2)], { type: "application/json" }));
-            Object.assign(document.createElement("a"), { href: url, download: `${analysis.name}.json` }).click();
-            URL.revokeObjectURL(url);
-          }}><FileJson className="w-4 h-4 mr-2" /> Raw JSON</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {confirmDelete ? (
-        <span className="flex items-center gap-1">
-          <button className="btn btn-sm !bg-cherry" onClick={remove}>Delete</button>
-          <button className="btn-ghost btn-sm" onClick={() => setConfirmDelete(false)}>Cancel</button>
-        </span>
-      ) : (
-        <button className="btn-secondary btn-sm !px-2.5" onClick={() => setConfirmDelete(true)} aria-label="Delete scan"><Trash2 className="w-4 h-4" strokeWidth={2.5} /></button>
-      )}
-    </>
-  );
-
   return (
-    <AppShell title={analysis.name} actions={actions}>
+    <>
       {/* Hero */}
       <section className="card p-6 md:p-8 fade-up">
         <div className="grid lg:grid-cols-[auto_1fr_auto] gap-8 items-center">
           <GradeSticker score={analysis.overall_score} grade={grade} label="Overall score" />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2 text-[13px]">
-              <span className="chip">{analysis.source_type === "github" ? "GitHub" : "ZIP upload"}</span>
+              <span className="chip">{SOURCE_LABEL[analysis.source_type] || "ZIP upload"}</span>
+              {analysis.mode === "browser" && <span className="chip bg-lime">Browser scan</span>}
               {analysis.repo_meta?.ref && <span className="chip font-mono">{analysis.repo_meta.ref}</span>}
               {analysis.repo_meta?.stars != null && <span className="chip"><Star className="w-3 h-3" strokeWidth={3} /> {compact(analysis.repo_meta.stars)}</span>}
               <span className="flex items-center gap-1 text-sub font-medium"><Clock className="w-3.5 h-3.5" strokeWidth={2.5} /> {timeAgo(analysis.created_at)}</span>
@@ -654,6 +563,116 @@ export default function AnalysisDetail() {
         {tab === "health" && <HealthTab analysis={analysis} />}
         {tab === "ship" && <ShipTab analysis={analysis} />}
       </div>
+    </>
+  );
+}
+
+export default function AnalysisDetail() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [analysis, setAnalysis] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const timer = useRef();
+  const wasProcessing = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const data = normalizeAnalysis((await axios.get(`${API}/analysis/${id}`)).data);
+        if (cancelled) return;
+        setAnalysis(data);
+        if (data.status === "processing") {
+          wasProcessing.current = true;
+          timer.current = setTimeout(load, 1500);
+        } else if (data.status === "completed" && wasProcessing.current) {
+          toast.success(`Scan complete: grade ${data.grade} ${GRADE[data.grade]?.emoji || ""}`);
+        }
+      } catch {
+        toast.error("Analysis not found");
+        navigate("/dashboard");
+      }
+    };
+    load();
+    return () => { cancelled = true; clearTimeout(timer.current); };
+  }, [id, navigate]);
+
+  const [rescanning, setRescanning] = useState(false);
+  const rescan = async () => {
+    if (rescanning) return;
+    setRescanning(true);
+    try {
+      const { data } = await axios.post(`${API}/analysis/github`, { github_url: analysis.source_url, name: analysis.name });
+      navigate(`/analysis/${data.analysis_id}`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't start re-scan");
+    } finally {
+      setRescanning(false);
+    }
+  };
+
+  const remove = async () => {
+    try {
+      await axios.delete(`${API}/analysis/${id}`);
+      toast.success("Scan deleted");
+      navigate("/history");
+    } catch {
+      toast.error("Delete failed");
+    }
+  };
+
+  if (!analysis) return <AppShell title="Scan"><Spinner /></AppShell>;
+  if (analysis.status === "processing") return <AppShell title={analysis.name}><ScanningView analysis={analysis} /></AppShell>;
+
+  if (analysis.status === "failed") {
+    return (
+      <AppShell title={analysis.name}>
+        <div className="max-w-xl mx-auto py-10">
+          <EmptyState icon={XCircle} title="Scan failed 💀" body={analysis.error || analysis.ai_summary || "Something went wrong."}
+            action={<div className="flex justify-center gap-2">
+              {analysis.source_url && <button className="btn-primary" onClick={rescan} disabled={rescanning}><RefreshCw className={`w-4 h-4 ${rescanning ? "animate-spin" : ""}`} strokeWidth={2.5} /> {rescanning ? "Starting…" : "Retry"}</button>}
+              <button className="btn-secondary" onClick={() => navigate("/new-analysis")}>New scan</button>
+            </div>} />
+        </div>
+      </AppShell>
+    );
+  }
+
+  const actions = (
+    <>
+      {analysis.source_url && (
+        <button className="btn-ghost btn-sm hidden sm:inline-flex" onClick={rescan} disabled={rescanning}><RefreshCw className={`w-4 h-4 ${rescanning ? "animate-spin" : ""}`} strokeWidth={2.5} /> {rescanning ? "Scanning…" : "Re-scan"}</button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button className="btn-primary btn-sm"><Download className="w-4 h-4" strokeWidth={2.5} /> Export</button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56 bg-snow border-[2.5px] border-ink shadow-brut rounded-[12px] p-1.5 text-ink font-semibold">
+          <DropdownMenuItem className="rounded-lg focus:bg-yel" onClick={() => { exportPdf(analysis); toast.success("PDF report generated"); }}><FileText className="w-4 h-4 mr-2" /> PDF audit report</DropdownMenuItem>
+          <DropdownMenuItem className="rounded-lg focus:bg-yel" onClick={() => downloadFromApi(`/analysis/${id}/sarif`, `${analysis.name}.sarif`)}><ShieldCheck className="w-4 h-4 mr-2" /> SARIF (Code Scanning)</DropdownMenuItem>
+          <DropdownMenuItem className="rounded-lg focus:bg-yel" onClick={() => downloadFromApi(`/analysis/${id}/sbom`, `${analysis.name}.cdx.json`)}><Package className="w-4 h-4 mr-2" /> CycloneDX SBOM</DropdownMenuItem>
+          <DropdownMenuSeparator className="bg-ink/20" />
+          <DropdownMenuItem className="rounded-lg focus:bg-yel" onClick={() => {
+            const url = URL.createObjectURL(new Blob([JSON.stringify(analysis, null, 2)], { type: "application/json" }));
+            Object.assign(document.createElement("a"), { href: url, download: `${analysis.name}.json` }).click();
+            URL.revokeObjectURL(url);
+          }}><FileJson className="w-4 h-4 mr-2" /> Raw JSON</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {confirmDelete ? (
+        <span className="flex items-center gap-1">
+          <button className="btn btn-sm !bg-cherry" onClick={remove}>Delete</button>
+          <button className="btn-ghost btn-sm" onClick={() => setConfirmDelete(false)}>Cancel</button>
+        </span>
+      ) : (
+        <button className="btn-secondary btn-sm !px-2.5" onClick={() => setConfirmDelete(true)} aria-label="Delete scan"><Trash2 className="w-4 h-4" strokeWidth={2.5} /></button>
+      )}
+    </>
+  );
+
+  return (
+    <AppShell title={analysis.name} actions={actions}>
+      <ReportBody analysis={analysis} />
     </AppShell>
   );
 }

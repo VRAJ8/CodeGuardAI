@@ -1,0 +1,19 @@
+# Runtime requirements
+-r requirements-dev.txt
+flask==0.12.2  # pinned
+requests[socks]>=2.19.0
+Django~=3.2.0
+pyyaml>=5.1,<6
+urllib3<1.25
+numpy
+pywin32==305; sys_platform == "win32"
+jinja2 == 2.10
+-e .
+git+https://github.com/org/pkg.git#egg=pkg
+https://example.com/wheels/pkg-1.0-py3-none-any.whl
+--hash=sha256:deadbeef
+Pillow!=8.0.0
+celery[redis,auth]==5.2.7 \
+    --hash=sha256:abc123
+Werkzeug===2.0.0
+httpx==0.28.1

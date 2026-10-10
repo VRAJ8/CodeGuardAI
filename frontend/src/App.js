@@ -10,6 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import NewAnalysis from "./pages/NewAnalysis";
 import AnalysisDetail from "./pages/AnalysisDetail";
 import History from "./pages/History";
+import LocalScan, { LocalReport } from "./pages/LocalScan";
 
 const FullscreenSpinner = ({ label }) => (
   <div className="min-h-screen grid place-items-center">
@@ -19,6 +20,13 @@ const FullscreenSpinner = ({ label }) => (
     </div>
   </div>
 );
+
+// No HTTP response at all means the browser never reached the API (offline, still waking, wrong URL).
+const signInError = (err) => {
+  const detail = err.response?.data?.detail;
+  if (!err.response) return "Can't reach the CodeGuard API. The server may be offline or still starting, so try again in a minute.";
+  return typeof detail === "string" ? detail.slice(0, 200) : `The API answered with HTTP ${err.response.status}.`;
+};
 
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
 const AuthCallback = () => {
@@ -40,8 +48,8 @@ const AuthCallback = () => {
         toast.success(`Welcome, ${res.data.name?.split(" ")[0] || "dev"} 👋`);
         navigate("/dashboard", { state: { user: res.data }, replace: true });
       })
-      .catch(() => {
-        toast.error("Authentication failed");
+      .catch((err) => {
+        toast.error("Sign-in failed", { description: signInError(err), duration: 10000 });
         navigate("/", { replace: true });
       });
   }, [location, navigate]);
@@ -73,6 +81,8 @@ function AppRouter() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/scan" element={<LocalScan />} />
+      <Route path="/scan/:localId" element={<LocalReport />} />
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/new-analysis" element={<ProtectedRoute><NewAnalysis /></ProtectedRoute>} />
       <Route path="/analysis/:id" element={<ProtectedRoute><AnalysisDetail /></ProtectedRoute>} />

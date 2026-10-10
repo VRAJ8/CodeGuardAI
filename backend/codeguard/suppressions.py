@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from .models import Finding, SourceFile, Suppression
 
+MARKER = "codeguard-ignore"
 TOKEN = re.compile(r"codeguard-ignore(?P<next>-next-line)?(?![\w-])")
 LEADERS = ("<!--", "//", "/*", "#", "--")
 # A comment leader must start the line or follow whitespace/punctuation (so "...abc#codeguard-ignore" in a URL is not one).
@@ -32,6 +33,10 @@ RULE = r"[A-Za-z][A-Za-z0-9_.\-]*[A-Za-z0-9]"
 TAIL = re.compile(rf"^(?:\s*:\s*(?P<rules>{RULE}(?:\s*,\s*{RULE})*))?(?:\s+--(?P<why>.*))?$")
 MAX_MARKER_LINE = 2000  # longer lines (minified bundles) are never searched for markers
 ALL = "*"
+ESCAPED = re.compile(r"\\.")  # a backslash escape, dropped before counting quotes
+QUOTES = ('"', "'", "`")
+MULTILINE_DELIMS = {"python": ('"""', "'''"), "javascript": ("`",), "typescript": ("`",)}
+MALFORMED = "malformed codeguard-ignore marker ignored (expected 'codeguard-ignore[-next-line][: RULE, ...] [-- reason]')"
 
 
 @dataclass
@@ -49,25 +54,22 @@ class ParseResult:
 
 def _in_string(prefix: str) -> bool:
     """Heuristic: an odd number of unescaped quotes before the comment leader means we're in a literal."""
-    unescaped = re.sub(r"\\.", "", prefix)
-    return any(unescaped.count(q) % 2 for q in ('"', "'", "`"))
+    unescaped = ESCAPED.sub("", prefix)
+    return any(unescaped.count(q) % 2 for q in QUOTES)
 
 
 def _multiline_string_lines(lines: List[str], language: str) -> Set[int]:
     """1-based numbers of lines that *start* inside a multi-line string (Python triple quotes, JS template
     literals). Markers on those lines are string content, so they are ignored (fail closed)."""
     inside: Set[int] = set()
-    if language == "python":
-        delims = ('"""', "'''")
-    elif language in ("javascript", "typescript"):
-        delims = ("`",)
-    else:
+    delims = MULTILINE_DELIMS.get(language)
+    if not delims:
         return inside
     open_delim = None
     for n, line in enumerate(lines, 1):
         if open_delim:
             inside.add(n)
-        text = re.sub(r"\\.", "", line)
+        text = ESCAPED.sub("", line)
         for d in delims:
             if open_delim and d != open_delim:
                 continue
@@ -86,12 +88,12 @@ def _strip_closer(tail: str) -> str:
 
 def parse(content: str, path: str = "", language: str = "") -> ParseResult:
     out = ParseResult()
-    if "codeguard-ignore" not in content:
+    if MARKER not in content:
         return out
     lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     in_multiline = _multiline_string_lines(lines, language)
     for lineno, line in enumerate(lines, 1):
-        if lineno in in_multiline or len(line) > MAX_MARKER_LINE or "codeguard-ignore" not in line:
+        if lineno in in_multiline or len(line) > MAX_MARKER_LINE or MARKER not in line:
             continue
         for m in TOKEN.finditer(line):
             before = line[: m.start()].rstrip()
@@ -103,8 +105,7 @@ def parse(content: str, path: str = "", language: str = "") -> ParseResult:
                 continue  # URL fragment, lookalike word, or a marker inside a string literal
             tail = TAIL.match(_strip_closer(line[m.end():]))
             if not tail:
-                out.warnings.append(f"{path}:{lineno}: malformed codeguard-ignore marker ignored "
-                                    f"(expected 'codeguard-ignore[-next-line][: RULE, ...] [-- reason]')")
+                out.warnings.append(f"{path}:{lineno}: {MALFORMED}")
                 break
             rules = {r.strip().upper() for r in tail.group("rules").split(",")} if tail.group("rules") else {ALL}
             target = lineno + 1 if m.group("next") else lineno
@@ -120,7 +121,7 @@ def apply(findings: List[Finding], files: List[SourceFile]) -> Tuple[List[Findin
     parsed: Dict[str, ParseResult] = {}
     warnings: List[str] = []
     for f in files:
-        if "codeguard-ignore" in f.content:
+        if MARKER in f.content:
             parsed[f.path] = parse(f.content, f.path, f.language)
             warnings += parsed[f.path].warnings
     active, suppressed = [], []

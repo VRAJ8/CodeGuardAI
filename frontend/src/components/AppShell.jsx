@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
-import { LayoutGrid, History, Plus, LogOut, Github, ShieldCheck, Menu, X, BookOpen } from "lucide-react";
+import { LayoutGrid, History, Plus, LogOut, Github, ShieldCheck, Menu, X, BookOpen, ScanSearch } from "lucide-react";
 import { API } from "@/lib/api";
 import { SCANNERS } from "@/lib/theme";
 
@@ -23,6 +23,7 @@ const NAV = [
   { to: "/dashboard", label: "Overview", icon: LayoutGrid },
   { to: "/history", label: "Scans", icon: History },
   { to: "/new-analysis", label: "New scan", icon: Plus },
+  { to: "/scan", label: "Browser scan", icon: ScanSearch },
 ];
 
 function NavItems({ onNavigate }) {
@@ -52,11 +53,12 @@ function NavItems({ onNavigate }) {
 export default function AppShell({ children, title, actions }) {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
+  const [signedOut, setSignedOut] = useState(false); // browser scans work without a session
   const [engines, setEngines] = useState(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    axios.get(`${API}/auth/me`).then((r) => setUser(r.data)).catch(() => {});
+    axios.get(`${API}/auth/me`).then((r) => setUser(r.data)).catch(() => setSignedOut(true));
     axios.get(`${API}/health`).then((r) => setEngines(r.data.engines)).catch(() => {});
   }, []);
 
@@ -99,6 +101,9 @@ export default function AppShell({ children, title, actions }) {
         <a href={`${API.replace(/\/api$/, "")}/docs`} target="_blank" rel="noreferrer" className="btn-ghost w-full !justify-start">
           <BookOpen className="w-4 h-4" /> API docs
         </a>
+        {signedOut ? (
+          <button onClick={() => navigate("/")} className="btn-secondary w-full mt-3">Sign in for cloud scans</button>
+        ) : (
         <div className="flex items-center gap-3 p-2 mt-3 card-flat">
           {user?.picture ? (
             <img src={user.picture} alt="" className="w-9 h-9 rounded-lg border-2 border-ink" />
@@ -115,6 +120,7 @@ export default function AppShell({ children, title, actions }) {
             <LogOut className="w-4 h-4" strokeWidth={2.5} />
           </button>
         </div>
+        )}
       </div>
     </div>
   );

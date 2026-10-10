@@ -20,6 +20,7 @@ ProgressFn = Callable[[str, int], Awaitable[None]]
 # When two scanners flag the same line+CWE, keep the more precise tool's result.
 SCANNER_PRIORITY = {"semgrep": 4, "bandit": 3, "osv": 3, "secrets": 2, "patterns": 1}
 SEV_RANK = {s: i for i, s in enumerate(reversed(SEVERITIES))}
+OSV_ERROR = "osv: dependency audit did not run ({})"  # fail closed: never reported as "0 vulnerable"
 
 
 async def _noop(stage: str, pct: int) -> None:
@@ -69,13 +70,15 @@ async def scan(
     use_bandit: bool = True,
     use_semgrep: bool = True,
     use_osv: bool = True,
+    radon: bool = True,
 ) -> ScanReport:
+    """`radon=False` measures every file with the generic complexity heuristic, as the in-browser engine does."""
     progress = progress or _noop
     started = time.monotonic()
     # One line-ending convention for every engine (CPython/Bandit treat a lone CR as a line break, the regex
     # scanners split on LF), so a finding, its marker and its fingerprint always agree on line numbers.
     files = [_normalize_newlines(f) for f in files]
-    scanners_run = ["patterns", "secrets", "radon"]
+    scanners_run = ["patterns", "secrets", "radon" if radon else "complexity"]
     errors: List[str] = []  # engines that were requested but could not run
     use_bandit = use_bandit and bandit_available()
     use_semgrep = use_semgrep and semgrep_available()
@@ -108,13 +111,13 @@ async def scan(
             deps = await enrich_with_osv(deps)
             scanners_run.append("osv")
         except OSVUnavailable as e:
-            errors.append(f"osv: dependency audit did not run ({e})")
+            errors.append(OSV_ERROR.format(e))
     findings += dependency_findings(deps, files)
 
     await progress("Measuring complexity & maintainability", 70)
     code_files = list(iter_code(files))
     all_health: List[BugRisk] = await asyncio.to_thread(
-        lambda: [analyze_file(f.content, f.path, f.language) for f in code_files])
+        lambda: [analyze_file(f.content, f.path, f.language, heuristic=not radon) for f in code_files])
     risks = sorted((r for r in all_health if r.risk_score > 0), key=lambda r: -r.risk_score)
 
     # Suppress before dedupe, so a rule-scoped marker means the same thing whichever engines are installed.

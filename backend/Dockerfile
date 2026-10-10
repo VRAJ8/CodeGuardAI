@@ -16,5 +16,6 @@ COPY server.py .
 RUN useradd --create-home --uid 10001 codeguard
 USER codeguard
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8000/api/health'); sys.exit(0)"
+# Probe the port the platform assigned ($PORT), not a hardcoded 8000, or the container is marked unhealthy.
+HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/api/health' % os.environ.get('PORT', '8000'), timeout=4)"
 CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000}"]

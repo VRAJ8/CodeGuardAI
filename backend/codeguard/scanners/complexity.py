@@ -28,12 +28,27 @@ DECISION = re.compile(r"\b(if|for|while|case|catch|elif|except)\b|&&|\|\||\?\?|(
 FUNC = re.compile(r"\bfunction\b|=>|\bfunc\s+\w|\bdef\s+\w|\bfn\s+\w|^\s*(public|private|protected|static)\s+[\w<>\[\]]+\s+\w+\s*\(",
                   re.MULTILINE)
 EMPTY_CATCH = re.compile(r"catch\s*(\([^)]*\))?\s*\{\s*\}")
+COMMENTS = re.compile(r"//.*|/\*[\s\S]*?\*/")
+STRING_LITERAL = re.compile(r"(['\"`])(?:\\.|(?!\1).)*\1")
+TODO = re.compile(r"\b(TODO|FIXME|HACK|XXX)\b")
+RANK_CUTOFFS = ((5, "A"), (10, "B"), (20, "C"), (30, "D"), (40, "E"))  # radon's cc_rank; anything higher is "F"
+
+# Risk signals as (threshold, risk points). The browser engine reads these through browser_export.
+LARGE_FILE, MODERATE_FILE = (500, 20), (300, 10)  # more than N lines
+VERY_HIGH_CC, HIGH_CC = (20, 30), (10, 15)  # most complex block above N
+HIGH_AVG_CC = (10, 10)  # average complexity per block above N
+LOW_MI, MODERATE_MI = (20, 20), (50, 10)  # Maintainability Index below N (Radon only)
+DEEP_NESTING, NESTED = (5, 15), (4, 8)  # nesting depth above N
+LONG_LINE, LONG_LINES = 120, (10, 5)  # more than N lines longer than LONG_LINE characters
+TODOS = (5, 10)  # more than N TODO/FIXME markers
+EMPTY_HANDLER = (15, 30)  # points per empty exception handler, and their cap
+RISK_LEVELS = ((50, "high"), (25, "medium"))  # risk score above N; otherwise "low"
 
 
 def _rank(cc: int) -> str:
     if RADON:
         return cc_rank(cc)
-    return "A" if cc <= 5 else "B" if cc <= 10 else "C" if cc <= 20 else "D" if cc <= 30 else "E" if cc <= 40 else "F"
+    return next((rank for limit, rank in RANK_CUTOFFS if cc <= limit), "F")
 
 
 def _py_nesting(tree: ast.AST) -> int:
@@ -57,7 +72,7 @@ def _py_empty_handlers(tree: ast.AST) -> int:
 
 def _brace_depth(content: str) -> int:
     depth = best = 0
-    for ch in re.sub(r"(['\"`])(?:\\.|(?!\1).)*\1", "", content):
+    for ch in STRING_LITERAL.sub("", content):
         if ch == "{":
             depth += 1
             best = max(best, depth)
@@ -81,67 +96,69 @@ def _python_metrics(content: str) -> Tuple[float, int, float, int, int, List[Fun
 
 
 def _generic_metrics(content: str) -> Tuple[float, int, None, int, int, List[FunctionMetric]]:
-    stripped = re.sub(r"//.*|/\*[\s\S]*?\*/", "", content)
+    stripped = COMMENTS.sub("", content)
     decisions = len(DECISION.findall(stripped))
     funcs = max(len(FUNC.findall(stripped)), 1)
     avg = 1 + decisions / funcs
     return avg, int(avg * 2), None, max(_brace_depth(stripped) - 1, 0), len(EMPTY_CATCH.findall(stripped)), []
 
 
-def analyze_file(content: str, file_path: str, language: str) -> BugRisk:
+def analyze_file(content: str, file_path: str, language: str, heuristic: bool = False) -> BugRisk:
+    """`heuristic=True` measures Python with the generic heuristic too (what the in-browser engine does,
+    where Radon and the ast module are unavailable)."""
     lines = content.split("\n")
     issues: List[str] = []
     score = 0.0
 
     try:
         avg_cc, max_cc, mi, nesting, empty, hotspots = (
-            _python_metrics(content) if language == "python" else _generic_metrics(content)
+            _python_metrics(content) if language == "python" and not heuristic else _generic_metrics(content)
         )
     except (SyntaxError, ValueError, RecursionError):
         avg_cc, max_cc, mi, nesting, empty, hotspots = 1.0, 1, None, 0, 0, []
         issues.append("File could not be parsed")
 
     n = len(lines)
-    if n > 500:
-        score += 20; issues.append(f"Large file ({n} lines) — consider splitting by responsibility")
-    elif n > 300:
-        score += 10; issues.append(f"Moderately large file ({n} lines)")
+    if n > LARGE_FILE[0]:
+        score += LARGE_FILE[1]; issues.append(f"Large file ({n} lines) — consider splitting by responsibility")
+    elif n > MODERATE_FILE[0]:
+        score += MODERATE_FILE[1]; issues.append(f"Moderately large file ({n} lines)")
 
-    if max_cc > 20:
-        score += 30; issues.append(f"Very high cyclomatic complexity (max {max_cc}, rank {_rank(max_cc)})")
-    elif max_cc > 10:
-        score += 15; issues.append(f"High cyclomatic complexity (max {max_cc}, rank {_rank(max_cc)})")
-    if avg_cc > 10:
-        score += 10; issues.append(f"Average complexity per block is {avg_cc:.1f}")
+    if max_cc > VERY_HIGH_CC[0]:
+        score += VERY_HIGH_CC[1]; issues.append(f"Very high cyclomatic complexity (max {max_cc}, rank {_rank(max_cc)})")
+    elif max_cc > HIGH_CC[0]:
+        score += HIGH_CC[1]; issues.append(f"High cyclomatic complexity (max {max_cc}, rank {_rank(max_cc)})")
+    if avg_cc > HIGH_AVG_CC[0]:
+        score += HIGH_AVG_CC[1]; issues.append(f"Average complexity per block is {avg_cc:.1f}")
 
     if mi is not None:
-        if mi < 20:
-            score += 20; issues.append(f"Low Maintainability Index ({mi:.0f}/100)")
-        elif mi < 50:
-            score += 10; issues.append(f"Moderate Maintainability Index ({mi:.0f}/100)")
+        if mi < LOW_MI[0]:
+            score += LOW_MI[1]; issues.append(f"Low Maintainability Index ({mi:.0f}/100)")
+        elif mi < MODERATE_MI[0]:
+            score += MODERATE_MI[1]; issues.append(f"Moderate Maintainability Index ({mi:.0f}/100)")
 
-    if nesting > 5:
-        score += 15; issues.append(f"Deeply nested logic (depth {nesting})")
-    elif nesting > 4:
-        score += 8; issues.append(f"Nested logic (depth {nesting})")
+    if nesting > DEEP_NESTING[0]:
+        score += DEEP_NESTING[1]; issues.append(f"Deeply nested logic (depth {nesting})")
+    elif nesting > NESTED[0]:
+        score += NESTED[1]; issues.append(f"Nested logic (depth {nesting})")
 
-    long_lines = sum(1 for line in lines if len(line) > 120)
-    if long_lines > 10:
-        score += 5; issues.append(f"{long_lines} lines exceed 120 characters")
+    long_lines = sum(1 for line in lines if len(line) > LONG_LINE)
+    if long_lines > LONG_LINES[0]:
+        score += LONG_LINES[1]; issues.append(f"{long_lines} lines exceed {LONG_LINE} characters")
 
-    todos = sum(1 for line in lines if re.search(r"\b(TODO|FIXME|HACK|XXX)\b", line))
-    if todos > 5:
-        score += 10; issues.append(f"{todos} TODO/FIXME markers")
+    todos = sum(1 for line in lines if TODO.search(line))
+    if todos > TODOS[0]:
+        score += TODOS[1]; issues.append(f"{todos} TODO/FIXME markers")
 
     if empty:
-        score += min(15 * empty, 30); issues.append(f"{empty} empty exception handler(s) swallow errors")
+        score += min(EMPTY_HANDLER[0] * empty, EMPTY_HANDLER[1]); issues.append(f"{empty} empty exception handler(s) swallow errors")
 
     score = min(score, 100.0)
     maintainability = mi if mi is not None else max(0.0, 100 - score)
     return BugRisk(
         file_path=file_path,
         risk_score=round(score, 1),
-        complexity="high" if score > 50 else "medium" if score > 25 else "low",
+        complexity=next((level for limit, level in RISK_LEVELS if score > limit), "low"),
         issues=issues,
         language=language,
         lines=n,
