@@ -30,6 +30,13 @@ All findings are **deduplicated across engines** (same file + line + CWE keeps t
 ### Dashboard
 Posture grade, critical/high count, leaked secrets, vulnerable dependencies, score trend, 4-week activity heatmap with scan streak, OWASP Top 10 exposure, severity mix, per-engine attribution, riskiest projects and language mix.
 
+### Browser mode (no sign-up, no server)
+[`/scan`](https://codevigil.netlify.app/scan) runs the scan entirely in your browser, in a Web Worker: drop a folder, a `.zip` or files, or paste a public GitHub repo. It runs the rule pack, secrets detection with entropy checks, inline suppressions, OSV.dev dependency audit with CVSS scoring and the complexity heuristic, and exports SARIF, CycloneDX and PDF.
+
+- **Privacy:** folders, ZIPs and files never leave the browser. The only request is the optional OSV.dev lookup, which sends package names and versions, never code. GitHub repos are read from `api.github.com` and `raw.githubusercontent.com` (the zipball endpoint doesn't allow browser downloads).
+- **Same results as the server:** the browser engine has no hand-copied rules. `python -m codeguard.browser_export` exports every rule and threshold from the Python engine to [`rules.generated.json`](frontend/src/lib/engine/rules.generated.json), and records the Python engine's output on a test corpus in [`parity.golden.json`](frontend/src/lib/engine/parity.golden.json). Jest requires the browser engine to reproduce it exactly, fingerprints included; pytest fails if either file is stale.
+- **Cloud-only:** Bandit, Semgrep, AI triage and scan history across devices. Browser scans are kept in that browser only (last 8).
+
 ---
 
 ## Use it in CI (GitHub Action)
@@ -117,6 +124,8 @@ yarn install && yarn start
 ### Tests & lint
 ```bash
 cd backend && pytest -q && ruff check .
+cd frontend && CI=true yarn test --watchAll=false   # browser engine, incl. parity with the Python engine
+cd backend && python -m codeguard.browser_export    # regenerate the browser rules + golden after changing a rule
 ```
 The suite covers every scanner, CVSS math checked against FIRST.org reference vectors, ZIP path-traversal handling, SARIF/SBOM shape, CLI exit codes, and the full API lifecycle (in-memory Mongo), including per-user isolation and regression tracking. [`tests/fixtures/vulnerable_app`](backend/tests/fixtures/vulnerable_app) is a deliberately vulnerable Flask + Express app.
 

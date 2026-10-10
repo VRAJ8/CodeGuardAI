@@ -10,6 +10,7 @@ import Dashboard from "./pages/Dashboard";
 import NewAnalysis from "./pages/NewAnalysis";
 import AnalysisDetail from "./pages/AnalysisDetail";
 import History from "./pages/History";
+import LocalScan, { LocalReport } from "./pages/LocalScan";
 
 const FullscreenSpinner = ({ label }) => (
   <div className="min-h-screen grid place-items-center">
@@ -80,6 +81,8 @@ function AppRouter() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/scan" element={<LocalScan />} />
+      <Route path="/scan/:localId" element={<LocalReport />} />
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/new-analysis" element={<ProtectedRoute><NewAnalysis /></ProtectedRoute>} />
       <Route path="/analysis/:id" element={<ProtectedRoute><AnalysisDetail /></ProtectedRoute>} />

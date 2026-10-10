@@ -28,8 +28,14 @@ SPECIAL_NAMES = {"requirements.txt": "config", "go.mod": "config", "dockerfile":
 SKIP_DIRS = {"node_modules", ".git", "dist", "build", "vendor", "venv", ".venv", "env", "__pycache__", ".next",
              "coverage", "site-packages", ".tox", ".mypy_cache", ".pytest_cache", "target", "bin", "obj", ".idea"}
 SKIP_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "Pipfile.lock", "go.sum", "composer.lock"}
+REQUIREMENTS_FILE = re.compile(r"requirements[-_.\w]*\.txt$")
+UNSCANNED_SUFFIXES = (".min.js", ".bundle.js", ".map")  # minified bundles and source maps
+NON_CODE = {"json", "config"}  # scanned for secrets and manifests, but not measured as code
+BINARY_SNIFF = 1024  # a NUL among the first N decoded characters marks a binary file
+ZIP_JUNK = "__MACOSX/"
 
-MAX_FILES = int(os.environ.get("CODEGUARD_MAX_FILES", 400))
+DEFAULT_MAX_FILES = 400
+MAX_FILES = int(os.environ.get("CODEGUARD_MAX_FILES", DEFAULT_MAX_FILES))
 MAX_FILE_BYTES = 512 * 1024
 MAX_TOTAL_BYTES = 30 * 1024 * 1024
 MAX_MEMBERS = 20000
@@ -44,9 +50,9 @@ def detect_language(path: str) -> Optional[str]:
     name = PurePosixPath(path).name.lower()
     if name in SPECIAL_NAMES or name.startswith(".env"):
         return SPECIAL_NAMES.get(name, "config")
-    if re.match(r"requirements[-_.\w]*\.txt$", name):
+    if REQUIREMENTS_FILE.match(name):
         return "config"
-    if name.endswith((".min.js", ".bundle.js", ".map")):
+    if name.endswith(UNSCANNED_SUFFIXES):
         return None
     return LANGUAGES.get(PurePosixPath(path).suffix.lower())
 
@@ -69,7 +75,7 @@ def _make(path: str, raw: bytes) -> Optional[SourceFile]:
     if not lang:
         return None
     text = raw.decode("utf-8", errors="ignore")
-    if "\x00" in text[:1024]:
+    if "\x00" in text[:BINARY_SNIFF]:
         return None
     return SourceFile(path=path, content=text, language=lang, lines=text.count("\n") + 1)
 
@@ -87,7 +93,7 @@ def load_zip(data: bytes) -> List[SourceFile]:
     files: List[SourceFile] = []
     total = 0
     for info in infos:
-        if info.is_dir() or info.filename.startswith("__MACOSX/"):
+        if info.is_dir() or info.filename.startswith(ZIP_JUNK):
             continue
         p = PurePosixPath(info.filename)
         if p.is_absolute() or ".." in p.parts:
@@ -181,4 +187,4 @@ async def load_github(url: str) -> Tuple[List[SourceFile], dict]:
 
 
 def iter_code(files: Iterable[SourceFile]) -> Iterable[SourceFile]:
-    return (f for f in files if f.language not in {"json", "config"})
+    return (f for f in files if f.language not in NON_CODE)

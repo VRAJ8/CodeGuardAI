@@ -42,6 +42,12 @@ const webpackConfig = {
       },
     },
   },
+  // Jest does not read webpack's alias; mirror it so tests can import "@/..." like the app does.
+  jest: {
+    configure: {
+      moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
+    },
+  },
   webpack: {
     alias: {
       '@': path.resolve(__dirname, 'src'),

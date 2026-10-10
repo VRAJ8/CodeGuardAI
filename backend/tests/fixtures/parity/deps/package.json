@@ -1,0 +1,29 @@
+{
+  "name": "parity-deps",
+  "version": "1.0.0",
+  "dependencies": {
+    "lodash": "4.17.11",
+    "express": "^4.16.0",
+    "@babel/core": "~7.12.3",
+    "minimist": ">=1.2.0 <2",
+    "left-pad": "latest",
+    "local-lib": "file:../local-lib",
+    "linked": "link:../linked",
+    "mono": "workspace:*",
+    "from-git": "git+https://github.com/org/repo.git#v1.0.0",
+    "tarball": "https://registry.example/pkg-1.0.0.tgz",
+    "aliased": "npm:react@18.2.0",
+    "range": "1.x",
+    "star": "*",
+    "prerelease": "2.0.0-beta.3",
+    "build-meta": "1.0.0+20130313144700",
+    "four-part": "1.2.3.4.5",
+    "weird": { "version": "1.0.0" }
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "eslint": "8.57.0",
+    "lodash": "4.17.21"
+  },
+  "optionalDependencies": { "fsevents": "2.3.3" }
+}

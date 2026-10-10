@@ -22,12 +22,23 @@ log = logging.getLogger(__name__)
 OSV_BATCH = "https://api.osv.dev/v1/querybatch"
 OSV_VULN = "https://api.osv.dev/v1/vulns/{id}"
 MAX_DETAIL_LOOKUPS = 80
+OSV_BATCH_SIZE = 500  # queries per querybatch request
+OSV_CONCURRENCY = 10  # parallel advisory-detail requests
 
 # ---------------------------------------------------------------- manifests
 
+VERSION = re.compile(r"\d+(\.\d+){0,3}([-.+][0-9A-Za-z.-]+)?")
+NON_REGISTRY = ("git", "http", "file:", "link:", "workspace:")  # specs that name a source, not a version
+REQUIREMENT = re.compile(r"^([A-Za-z0-9_.\-]+)(\[[^\]]*\])?\s*(==|>=|~=|<=|>|<)?\s*([^;,\s]*)")
+PINNING_OPS = ("==", "~=", ">=")  # operators whose version is a usable lower bound for the audit
+REQUIREMENT_SKIP = ("-", "git+")  # pip options (-r, -e, --hash) and VCS requirements
+GO_REQUIRE = re.compile(r"^(?:require\s+)?([\w./\-]+)\s+v([\w.\-+]+)")
+REQUIREMENTS_FILE = re.compile(r"requirements([-_.\w]*)\.txt$")
+
+
 def _clean_version(spec: str) -> Optional[str]:
-    m = re.search(r"\d+(\.\d+){0,3}([-.+][0-9A-Za-z.-]+)?", spec or "")
-    if not m or any(x in spec for x in ("git", "http", "file:", "link:", "workspace:")):
+    m = VERSION.search(spec or "")
+    if not m or any(x in spec for x in NON_REGISTRY):
         return None
     return m.group(0)
 
@@ -49,11 +60,11 @@ def parse_requirements(content: str, path: str) -> List[Dependency]:
     deps = []
     for raw in content.splitlines():
         line = raw.split("#")[0].strip()
-        if not line or line.startswith(("-", "git+")) or "://" in line:  # options, VCS and URL requirements
+        if not line or line.startswith(REQUIREMENT_SKIP) or "://" in line:  # options, VCS and URL requirements
             continue
-        m = re.match(r"^([A-Za-z0-9_.\-]+)(\[[^\]]*\])?\s*(==|>=|~=|<=|>|<)?\s*([^;,\s]*)", line)
+        m = REQUIREMENT.match(line)
         if m:
-            version = _clean_version(m.group(4)) if m.group(3) in ("==", "~=", ">=") else None
+            version = _clean_version(m.group(4)) if m.group(3) in PINNING_OPS else None
             deps.append(Dependency(name=m.group(1), version=version or "", ecosystem="PyPI", manifest=path))
     return deps
 
@@ -69,7 +80,7 @@ def parse_go_mod(content: str, path: str) -> List[Dependency]:
         if in_block and line == ")":
             in_block = False
             continue
-        m = re.match(r"^(?:require\s+)?([\w./\-]+)\s+v([\w.\-+]+)", line) if (in_block or line.startswith("require ")) else None
+        m = GO_REQUIRE.match(line) if (in_block or line.startswith("require ")) else None
         if m:
             deps.append(Dependency(name=m.group(1), version=m.group(2), ecosystem="Go", manifest=path))
     return deps
@@ -81,7 +92,7 @@ def collect_dependencies(files: List[SourceFile]) -> List[Dependency]:
         name = f.path.rsplit("/", 1)[-1]
         if name == "package.json":
             deps += parse_package_json(f.content, f.path)
-        elif re.match(r"requirements([-_.\w]*)\.txt$", name):
+        elif REQUIREMENTS_FILE.match(name):
             deps += parse_requirements(f.content, f.path)
         elif name == "go.mod":
             deps += parse_go_mod(f.content, f.path)
@@ -94,6 +105,7 @@ _W = {
     "UI": {"N": 0.85, "R": 0.62}, "C": {"H": 0.56, "L": 0.22, "N": 0}, "I": {"H": 0.56, "L": 0.22, "N": 0},
     "A": {"H": 0.56, "L": 0.22, "N": 0},
 }
+_PR = {False: {"N": 0.85, "L": 0.62, "H": 0.27}, True: {"N": 0.85, "L": 0.68, "H": 0.5}}  # by scope changed
 
 
 def _roundup(x: float) -> float:
@@ -108,7 +120,7 @@ def cvss3_base_score(vector: str) -> Optional[float]:
     try:
         m = dict(part.split(":") for part in vector.split("/")[1:])
         scope_changed = m["S"] == "C"
-        pr = {"N": 0.85, "L": 0.68 if scope_changed else 0.62, "H": 0.5 if scope_changed else 0.27}[m["PR"]]
+        pr = _PR[scope_changed][m["PR"]]
         iss = 1 - (1 - _W["C"][m["C"]]) * (1 - _W["I"][m["I"]]) * (1 - _W["A"][m["A"]])
         impact = 7.52 * (iss - 0.029) - 3.25 * (iss - 0.02) ** 15 if scope_changed else 6.42 * iss
         exploit = 8.22 * _W["AV"][m["AV"]] * _W["AC"][m["AC"]] * pr * _W["UI"][m["UI"]]
@@ -120,15 +132,19 @@ def cvss3_base_score(vector: str) -> Optional[float]:
         return None
 
 
+SEVERITY_CUTOFFS = ((9, "critical"), (7, "high"), (4, "medium"))  # CVSS score at or above; otherwise "low"
+
+
 def severity_from_score(score: float) -> str:
-    return "critical" if score >= 9 else "high" if score >= 7 else "medium" if score >= 4 else "low"
+    return next((sev for limit, sev in SEVERITY_CUTOFFS if score >= limit), "low")
 
 
 GHSA_SEVERITY = {"CRITICAL": "critical", "HIGH": "high", "MODERATE": "medium", "MEDIUM": "medium", "LOW": "low"}
+VERSION_SPLIT = re.compile(r"[.\-+]")
 
 
 def _version_key(v: str) -> Tuple:
-    return tuple(int(p) if p.isdigit() else 0 for p in re.split(r"[.\-+]", v)[:4])
+    return tuple(int(p) if p.isdigit() else 0 for p in VERSION_SPLIT.split(v)[:4])
 
 
 def parse_vuln(detail: dict, dep: Dependency) -> Vulnerability:
@@ -171,8 +187,8 @@ async def enrich_with_osv(deps: List[Dependency], client: Optional[httpx.AsyncCl
     client = client or httpx.AsyncClient(timeout=20)
     try:
         ids_per_dep: Dict[int, List[str]] = {}
-        for start in range(0, len(queryable), 500):
-            chunk = queryable[start:start + 500]
+        for start in range(0, len(queryable), OSV_BATCH_SIZE):
+            chunk = queryable[start:start + OSV_BATCH_SIZE]
             resp = await client.post(OSV_BATCH, json={"queries": [
                 {"package": {"name": d.name, "ecosystem": d.ecosystem}, "version": d.version} for d in chunk]})
             resp.raise_for_status()
@@ -182,7 +198,7 @@ async def enrich_with_osv(deps: List[Dependency], client: Optional[httpx.AsyncCl
                     ids_per_dep[start + i] = ids
 
         unique_ids = list(dict.fromkeys(i for ids in ids_per_dep.values() for i in ids))[:MAX_DETAIL_LOOKUPS]
-        sem = asyncio.Semaphore(10)
+        sem = asyncio.Semaphore(OSV_CONCURRENCY)
 
         async def fetch(vid: str):
             async with sem:
@@ -203,6 +219,9 @@ async def enrich_with_osv(deps: List[Dependency], client: Optional[httpx.AsyncCl
 
 
 SEV_ORDER = ["low", "medium", "high", "critical"]
+DEP_CWE = "CWE-1395"
+# The manifest line naming a dependency: DEP_LINE[0] + re.escape(name) + DEP_LINE[1].
+DEP_LINE = (r"['\"]?", r"['\"]?\s*[:=<>~ ]")
 
 
 def dependency_findings(deps: List[Dependency], files: List[SourceFile]) -> List[Finding]:
@@ -214,7 +233,7 @@ def dependency_findings(deps: List[Dependency], files: List[SourceFile]) -> List
         worst = max(d.vulnerabilities, key=lambda v: (SEV_ORDER.index(v.severity), v.cvss or 0))
         fixes = [v.fixed_in for v in d.vulnerabilities if v.fixed_in]
         target = sorted(fixes, key=_version_key)[-1] if fixes else None
-        pattern = re.compile(rf"['\"]?{re.escape(d.name)}['\"]?\s*[:=<>~ ]")
+        pattern = re.compile(DEP_LINE[0] + re.escape(d.name) + DEP_LINE[1])
         line = next((n for n, text in enumerate(contents.get(d.manifest, []), 1) if pattern.search(text)), None)
         ids = ", ".join((v.aliases[0] if v.aliases else v.id) for v in d.vulnerabilities[:5])
         findings.append(Finding(
@@ -226,8 +245,8 @@ def dependency_findings(deps: List[Dependency], files: List[SourceFile]) -> List
             file_path=d.manifest,
             line_number=line,
             recommendation=f"Upgrade {d.name} to {target} or later." if target else f"No fixed release yet — consider replacing {d.name}.",
-            cwe="CWE-1395",
-            owasp=owasp_for_cwe("CWE-1395"),
+            cwe=DEP_CWE,
+            owasp=owasp_for_cwe(DEP_CWE),
             snippet=f"{d.name}@{d.version}",
         ).with_fingerprint())
     return findings

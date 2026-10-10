@@ -38,6 +38,11 @@ PLACEHOLDER_HINTS = ("${", "{{", "<", "process.env", "os.environ", "getenv", "yo
 
 RECOMMENDATION = ("Revoke and rotate this credential now, then load it from an environment variable or a secrets "
                   "manager (Vault, AWS Secrets Manager, Doppler). Purge it from git history with git filter-repo.")
+MAX_LINE = 2000  # longer lines (minified bundles) are not searched
+MIN_ENTROPY = 3.0  # bits/char a generic `password = "..."` value needs to be reported
+MIN_DISTINCT = 4  # values with fewer distinct characters are placeholders ("xxxxxxxx", "abababab")
+# redact(): values longer than REDACT_MIN keep their first/last few characters around a fixed-width mask.
+REDACT_MIN, REDACT_HEAD, REDACT_TAIL, REDACT_MASK = 10, 4, 2, "*" * 8
 
 
 def shannon_entropy(value: str) -> float:
@@ -48,19 +53,19 @@ def shannon_entropy(value: str) -> float:
 
 
 def redact(value: str) -> str:
-    return f"{value[:4]}{'*' * 8}{value[-2:]}" if len(value) > 10 else "*" * 8
+    return f"{value[:REDACT_HEAD]}{REDACT_MASK}{value[-REDACT_TAIL:]}" if len(value) > REDACT_MIN else REDACT_MASK
 
 
 def _looks_placeholder(value: str) -> bool:
     low = value.lower()
-    return any(h in low for h in PLACEHOLDER_HINTS) or len(set(value)) < 4
+    return any(h in low for h in PLACEHOLDER_HINTS) or len(set(value)) < MIN_DISTINCT
 
 
 def scan_secrets(content: str, file_path: str) -> List[Finding]:
     findings: List[Finding] = []
     seen_lines = set()
     for lineno, line in enumerate(content.split("\n"), 1):
-        if len(line) > 2000:
+        if len(line) > MAX_LINE:
             continue
         for rid, title, rx, sev in _COMPILED:
             m = rx.search(line)
@@ -75,7 +80,7 @@ def scan_secrets(content: str, file_path: str) -> List[Finding]:
         m = GENERIC.search(line)
         if m:
             value = m.group(3)
-            if _looks_placeholder(value) or shannon_entropy(value) < 3.0:
+            if _looks_placeholder(value) or shannon_entropy(value) < MIN_ENTROPY:
                 continue
             findings.append(_make("SEC-GENERIC", f"Hardcoded credential in `{m.group(1)[:40]}`", "high",
                                   file_path, lineno, value, entropy=shannon_entropy(value), line=line))

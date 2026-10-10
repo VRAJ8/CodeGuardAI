@@ -1,0 +1,83 @@
+{
+  "$comment": "Mocked OSV.dev responses for the OSV parity vectors. batch maps 'ecosystem/name@version' to the advisory ids /v1/querybatch returns; vulns holds /v1/vulns/{id} bodies; an id listed in a batch result but absent from vulns answers 404.",
+  "batch": {
+    "npm/lodash@4.17.11": ["GHSA-jf85-cpcp-j695", "GHSA-p6mc-m468-83gw"],
+    "npm/lodash@4.17.21": [],
+    "npm/minimist@1.2.0": ["GHSA-xvch-5gv4-984h"],
+    "npm/express@4.16.0": ["GHSA-0000-missing-detail"],
+    "PyPI/flask@0.12.2": ["PYSEC-2018-66", "PYSEC-2019-179"],
+    "PyPI/requests@2.19.0": ["GHSA-x84v-xcm2-53pg"],
+    "Go/github.com/gin-gonic/gin@1.6.0": ["GO-2020-0001"]
+  },
+  "vulns": {
+    "GHSA-jf85-cpcp-j695": {
+      "id": "GHSA-jf85-cpcp-j695",
+      "aliases": ["CVE-2019-10744"],
+      "summary": "Prototype Pollution in lodash",
+      "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:H"}],
+      "database_specific": {"severity": "CRITICAL"},
+      "affected": [{"package": {"name": "lodash", "ecosystem": "npm"},
+                    "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "4.17.12"}]}]}],
+      "references": [{"type": "ADVISORY", "url": "https://nvd.nist.gov/vuln/detail/CVE-2019-10744"}]
+    },
+    "GHSA-p6mc-m468-83gw": {
+      "id": "GHSA-p6mc-m468-83gw",
+      "aliases": ["CVE-2020-8203"],
+      "summary": "Prototype Pollution in lodash",
+      "details": "Versions of lodash prior to 4.17.19 are vulnerable to Prototype Pollution.",
+      "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:H/A:H"}],
+      "database_specific": {"severity": "HIGH", "cwe_ids": ["CWE-1321"]},
+      "affected": [{"package": {"name": "lodash", "ecosystem": "npm"},
+                    "ranges": [{"type": "SEMVER", "events": [{"introduced": "3.7.0"}, {"fixed": "4.17.19"}]}]}],
+      "references": [{"type": "WEB", "url": "https://github.com/lodash/lodash/issues/4744"},
+                     {"type": "ADVISORY", "url": "https://nvd.nist.gov/vuln/detail/CVE-2020-8203"}]
+    },
+    "GHSA-xvch-5gv4-984h": {
+      "id": "GHSA-xvch-5gv4-984h",
+      "aliases": ["CVE-2021-44906"],
+      "summary": "Prototype Pollution in minimist",
+      "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
+      "database_specific": {"severity": "CRITICAL"},
+      "affected": [{"package": {"name": "minimist", "ecosystem": "npm"},
+                    "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "0.2.4"}]},
+                               {"type": "SEMVER", "events": [{"introduced": "1.0.0"}, {"fixed": "1.2.6"}]}]}],
+      "references": [{"type": "ADVISORY", "url": "https://nvd.nist.gov/vuln/detail/CVE-2021-44906"}]
+    },
+    "PYSEC-2018-66": {
+      "id": "PYSEC-2018-66",
+      "aliases": ["CVE-2018-1000656", "GHSA-562c-5r94-xh97"],
+      "details": "  The Pallets Project flask version Before 0.12.3 contains a CWE-20: Improper Input Validation vulnerability in flask that can result in Large amount of memory usage possibly leading to denial of service. This attack appear to be exploitable via Attacker provides JSON data in incorrect encoding. This vulnerability appears to have been fixed in 0.12.3.",
+      "severity": [{"type": "CVSS_V3", "score": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"}],
+      "affected": [{"package": {"name": "Flask", "ecosystem": "PyPI"},
+                    "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "0.12.3"}]}]}],
+      "references": [{"type": "WEB", "url": "https://github.com/pallets/flask/pull/2691"}]
+    },
+    "PYSEC-2019-179": {
+      "id": "PYSEC-2019-179",
+      "aliases": [],
+      "summary": "Flask session cookie vulnerability",
+      "severity": [{"type": "CVSS_V4", "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N"}],
+      "affected": [{"package": {"name": "flask", "ecosystem": "PyPI"},
+                    "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "1.0"}]}]},
+                   {"package": {"name": "quart", "ecosystem": "PyPI"},
+                    "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "9.9"}]}]}],
+      "references": []
+    },
+    "GHSA-x84v-xcm2-53pg": {
+      "id": "GHSA-x84v-xcm2-53pg",
+      "aliases": ["CVE-2018-18074"],
+      "summary": "Insufficiently Protected Credentials in Requests",
+      "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"}],
+      "database_specific": {"severity": "MODERATE"},
+      "affected": [{"package": {"name": "requests", "ecosystem": "PyPI"},
+                    "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "2.20.0"}]}]}],
+      "references": [{"type": "ADVISORY", "url": "https://nvd.nist.gov/vuln/detail/CVE-2018-18074"}]
+    },
+    "GO-2020-0001": {
+      "id": "GO-2020-0001",
+      "summary": "Arbitrary log line injection in github.com/gin-gonic/gin",
+      "affected": [{"package": {"name": "github.com/gin-gonic/gin", "ecosystem": "Go"},
+                    "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "1.4.0"}]}]}]
+    }
+  }
+}

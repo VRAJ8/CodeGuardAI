@@ -43,7 +43,9 @@ runs:
         EXCLUDE: ${{ inputs.exclude }}
       run: |
         args=()
+        set -f  # split the exclude list on whitespace, but pass globs to CodeGuard instead of expanding them here
         for pattern in $EXCLUDE; do args+=(--exclude "$pattern"); done
+        set +f
         python -m codeguard scan "$SCAN_PATH" "${args[@]}" --format sarif -o "$SARIF" --fail-on none
         # Human-readable summary in the job log; this step's exit code gates the build.
         python -m codeguard scan "$SCAN_PATH" "${args[@]}" --fail-on "$FAIL_ON"

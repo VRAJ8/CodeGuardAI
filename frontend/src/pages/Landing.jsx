@@ -87,12 +87,14 @@ export default function Landing() {
           <div className="flex items-center gap-2">
             <a className="btn-ghost btn-sm hidden sm:inline-flex" href="https://github.com/VRAJ8/CodeGuardAI" target="_blank" rel="noreferrer"><Github className="w-4 h-4" strokeWidth={2.5} /> GitHub</a>
             {DEV_LOGIN && <button className="btn-secondary btn-sm" onClick={devLogin}>Dev login</button>}
+            <button className="btn-secondary btn-sm hidden sm:inline-flex" onClick={() => navigate("/scan")}>Browser scan</button>
             <button className="btn-dark btn-sm" onClick={handleLogin} data-testid="login-btn">Get started</button>
           </div>
         </div>
         {apiDown && (
           <div role="status" className="border-t-[2.5px] border-ink bg-tang px-4 py-2 text-center text-sm font-bold">
-            Heads up: the CodeGuard API isn't responding right now, so sign-in will fail until it's back.
+            Heads up: the CodeGuard API isn't responding right now, so sign-in will fail until it's back.{" "}
+            <button className="underline underline-offset-2" onClick={() => navigate("/scan")}>Scan in your browser instead →</button>
           </div>
         )}
       </nav>
@@ -115,7 +117,8 @@ export default function Landing() {
               with AI-written fixes for what it finds.
             </p>
             <div className="mt-9 flex flex-wrap gap-3 fade-up d-3">
-              <button className="btn-primary h-14 px-7 text-lg" onClick={handleLogin}>Scan a repo, free <ArrowRight className="w-5 h-5" strokeWidth={3} /></button>
+              <button className="btn-primary h-14 px-7 text-lg" onClick={() => navigate("/scan")}>Scan in your browser <ArrowRight className="w-5 h-5" strokeWidth={3} /></button>
+              <button className="btn-dark h-14 px-6 text-lg" onClick={handleLogin}>Cloud scan</button>
               <a className="btn-secondary h-14 px-6 text-lg" href="https://github.com/VRAJ8/CodeGuardAI" target="_blank" rel="noreferrer"><Star className="w-5 h-5" strokeWidth={2.5} /> Star it</a>
             </div>
           </div>

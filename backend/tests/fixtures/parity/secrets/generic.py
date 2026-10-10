@@ -1,0 +1,22 @@
+"""Generic credential assignments: reported only with enough entropy and no placeholder hints."""
+DB_PASSWORD = "Xk9#mQ2vLp8$wZr4"
+api_key = "Zr7wT4nBq9LmX2"
+client-secret: 'Pq8!vR3#tY6@uI1'
+AUTH_TOKEN = "aaaaaaaaaaaa"
+password = "abcabcabcabc"
+secret = "abcdabcdabcd"
+private_key = "${PRIVATE_KEY}"
+api_key = "your-api-key-here"
+passwd = "changeme12345"
+pwd = "short"
+token_secret = "has space inside"
+access_token = os.environ["TOKEN"]
+api_key = "Xk9#mQ2vLp8$wZr4EXAMPLE"
+api_key_example = "Kd8#Lm2$Qp5!"
+motDePasséSecret_password = "Gh7#kL2$mN9@"
+PRİVATE_KEY = "Zx8Qw2Lm5Np7Rt"
+emoji_password = "😀😁😂🤣ab12"
+vault_secret = "🔑🔑Kx9#mQ2vLp8"
+Password="Ab1$Cd2%Ef3^"
+x = {"secret": "Mq3$Wn6^Er9&"}
+db_password = "__FAKE_DB_URL__"

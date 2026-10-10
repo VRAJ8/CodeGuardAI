@@ -1,0 +1,7 @@
+database:
+  password: "Ty6#Ui3$Op0@As"
+  host: db.internal
+api_key: 'Gh4#Jk7$Lz1@Qw'
+token: "{{ vault.token }}"
+auth_token: "xxxxxxxxxxxx"
+redis: __FAKE_REDIS_URL__

@@ -1,0 +1,1758 @@
+{
+  "$comment": "Inputs for the unit vectors in frontend/src/lib/engine/parity.golden.json; codeguard.browser_export computes every expected value from the Python engine. Kept here, outside backend/codeguard, so CodeGuard's self-scan never reports test data. make_source_file contents are [piece, count] runs.",
+  "paths": [
+    "app.py",
+    "src/App.JSX",
+    "index.mjs",
+    "lib.cjs",
+    "types.d.ts",
+    "main.go",
+    "lib.rs",
+    "x.cpp",
+    "x.cc",
+    "x.c",
+    "x.h",
+    "x.rb",
+    "x.php",
+    "x.cs",
+    "x.swift",
+    "x.kt",
+    "x.Py",
+    "src/\u00dcBER.PY",
+    "caf\u00e9/na\u00efve.py",
+    "data.json",
+    "ci.yml",
+    "ci.YAML",
+    "pyproject.toml",
+    "setup.cfg",
+    "app.ini",
+    "app.properties",
+    "prod.env",
+    ".env",
+    ".env.local",
+    ".ENV.production",
+    "config/.envrc",
+    ".environment",
+    "requirements.txt",
+    "requirements-dev.txt",
+    "requirements_test.txt",
+    "requirements.in",
+    "Requirements.TXT",
+    "dev-requirements.txt",
+    "requirements/base.txt",
+    "requirements.txt.bak",
+    "go.mod",
+    "go.sum",
+    "sub/go.mod",
+    "Dockerfile",
+    "docker/Dockerfile.prod",
+    "dockerfile",
+    "app.min.js",
+    "bundle/app.bundle.js",
+    "app.js.map",
+    "x.min.JS",
+    "x.MAP",
+    "styles.css",
+    "README.md",
+    "Makefile",
+    "noext",
+    ".gitignore",
+    "a.",
+    ".py",
+    "dir.py/file",
+    "trailing.py/",
+    "node_modules/x/index.js",
+    "src/node_modules/x.js",
+    "node_modules",
+    "a/node_modules",
+    "vendor/lib.go",
+    "site-packages/x.py",
+    "src/build/gen.js",
+    "build.js",
+    "dist.js",
+    "package-lock.json",
+    "web/yarn.lock",
+    "Pipfile.lock",
+    "pipfile.lock",
+    "Node_Modules/x.js",
+    "./src/app.py",
+    "a//b.py",
+    "/abs/node_modules/x.js",
+    "//net/share.py",
+    "///triple/x.py",
+    "a/./node_modules/b.js",
+    "a/../node_modules/b.js",
+    "src/.git/config.js",
+    ".github/workflows/ci.yml",
+    "a\\b.py",
+    "",
+    "/",
+    "dir/",
+    ".",
+    "..",
+    "a/.",
+    "x.tar.gz",
+    "archive.ZIP",
+    "Dockerfile.dockerfile"
+  ],
+  "strip_common_prefix": [
+    [
+      "owner-repo-abc/src/a.py",
+      "owner-repo-abc/README.md"
+    ],
+    [
+      "a/x",
+      "b/y"
+    ],
+    [
+      "a/x",
+      "top.py"
+    ],
+    [
+      "a/x"
+    ],
+    [
+      "a"
+    ],
+    [],
+    [
+      "/x/y",
+      "/z"
+    ],
+    [
+      "a/b/c",
+      "a/d"
+    ],
+    [
+      "a//b"
+    ],
+    [
+      "a/b",
+      "a/"
+    ],
+    [
+      "a/b",
+      "A/c"
+    ]
+  ],
+  "make_source_file": [
+    [
+      "a.py",
+      [
+        [
+          "x = 1\n",
+          1
+        ]
+      ]
+    ],
+    [
+      "a.py",
+      []
+    ],
+    [
+      "a.js",
+      [
+        [
+          "a\r\nb",
+          1
+        ]
+      ]
+    ],
+    [
+      "a.js",
+      [
+        [
+          "a\rb\r",
+          1
+        ]
+      ]
+    ],
+    [
+      "a.txt",
+      [
+        [
+          "x",
+          1
+        ]
+      ]
+    ],
+    [
+      "a.js",
+      [
+        [
+          "\u0000abc",
+          1
+        ]
+      ]
+    ],
+    [
+      "a.js",
+      [
+        [
+          "a",
+          1023
+        ],
+        [
+          "\u0000",
+          1
+        ]
+      ]
+    ],
+    [
+      "a.js",
+      [
+        [
+          "a",
+          1024
+        ],
+        [
+          "\u0000",
+          1
+        ]
+      ]
+    ],
+    [
+      "a.js",
+      [
+        [
+          "a",
+          1000
+        ],
+        [
+          "\ud83d\ude00",
+          23
+        ],
+        [
+          "\u0000",
+          1
+        ]
+      ]
+    ],
+    [
+      "a.js",
+      [
+        [
+          "a",
+          1001
+        ],
+        [
+          "\ud83d\ude00",
+          23
+        ],
+        [
+          "\u0000",
+          1
+        ]
+      ]
+    ],
+    [
+      "node_modules/x.js",
+      [
+        [
+          "x",
+          1
+        ]
+      ]
+    ],
+    [
+      "Dockerfile",
+      [
+        [
+          "FROM x\n",
+          1
+        ]
+      ]
+    ],
+    [
+      "x.min.js",
+      [
+        [
+          "x",
+          1
+        ]
+      ]
+    ],
+    [
+      "a.json",
+      [
+        [
+          "\ufeff{}",
+          1
+        ]
+      ]
+    ],
+    [
+      "a.go",
+      [
+        [
+          "\n",
+          3
+        ]
+      ]
+    ]
+  ],
+  "decode_utf8": [
+    [
+      112,
+      108,
+      97,
+      105,
+      110,
+      32,
+      97,
+      115,
+      99,
+      105,
+      105
+    ],
+    [
+      239,
+      187,
+      191,
+      66,
+      79,
+      77,
+      32,
+      107,
+      101,
+      112,
+      116
+    ],
+    [
+      99,
+      97,
+      102,
+      195,
+      169,
+      32,
+      240,
+      159,
+      152,
+      128
+    ],
+    [
+      98,
+      97,
+      100,
+      32,
+      255,
+      32,
+      98,
+      121,
+      116,
+      101
+    ],
+    [
+      116,
+      114,
+      117,
+      110,
+      99,
+      32,
+      226,
+      130,
+      32,
+      109,
+      105,
+      100
+    ],
+    [
+      116,
+      114,
+      117,
+      110,
+      99,
+      32,
+      101,
+      110,
+      100,
+      32,
+      226
+    ],
+    [
+      192,
+      128,
+      32,
+      111,
+      118,
+      101,
+      114,
+      108,
+      111,
+      110,
+      103
+    ],
+    [
+      237,
+      160,
+      128,
+      32,
+      115,
+      117,
+      114,
+      114,
+      111,
+      103,
+      97,
+      116,
+      101
+    ],
+    [
+      244,
+      144,
+      128,
+      128,
+      32,
+      116,
+      111,
+      111,
+      32,
+      98,
+      105,
+      103
+    ],
+    [
+      239,
+      191,
+      189,
+      32,
+      114,
+      101,
+      97,
+      108,
+      32,
+      114,
+      101,
+      112,
+      108,
+      97,
+      99,
+      101,
+      109,
+      101,
+      110,
+      116
+    ],
+    [
+      226,
+      130,
+      239,
+      191,
+      189,
+      32,
+      109,
+      105,
+      120
+    ],
+    [
+      128,
+      128,
+      32,
+      108,
+      111,
+      110,
+      101,
+      32,
+      99,
+      111,
+      110,
+      116,
+      105,
+      110,
+      117,
+      97,
+      116,
+      105,
+      111,
+      110
+    ],
+    [
+      240,
+      159,
+      152,
+      32,
+      99,
+      117,
+      116,
+      32,
+      116,
+      104,
+      101,
+      110,
+      32,
+      240,
+      159,
+      152,
+      128
+    ],
+    [
+      224,
+      128,
+      175,
+      32,
+      111,
+      118,
+      101,
+      114,
+      108,
+      111,
+      110,
+      103,
+      51
+    ],
+    [
+      97,
+      0,
+      98
+    ],
+    [
+      248,
+      136,
+      128,
+      128,
+      128,
+      32,
+      102,
+      105,
+      118,
+      101
+    ],
+    [
+      254,
+      255
+    ],
+    [
+      226,
+      40,
+      161
+    ],
+    []
+  ],
+  "github_urls": [
+    "https://github.com/psf/requests",
+    "https://github.com/psf/requests.git",
+    "http://www.github.com/a/b/",
+    "https://github.com/vercel/next.js/tree/canary",
+    "https://github.com/o/r/tree/feat/x?tab=readme#top",
+    "  https://github.com/o/r  ",
+    "https://gitlab.com/a/b",
+    "https://github.com/o",
+    "github.com/o/r",
+    "https://github.com/o/r/blob/main/x.py",
+    "https://github.com/o.dots/r_u-n.git/"
+  ],
+  "strings": [
+    "  a b  ",
+    "\t\n a\n",
+    "\u001c\u0085a\u3000",
+    "\ufeffa\ufeff",
+    "\u00a0a",
+    "\u2028a\u2029",
+    "",
+    "   ",
+    "\u0000a\u0000",
+    "a\nb",
+    "a\r\nb",
+    "a\rb",
+    "a\u000bb",
+    "a\fb",
+    "a\u001cb",
+    "a\u001db",
+    "a\u001eb",
+    "a\u001fb",
+    "a\u0085b",
+    "a\u2028b",
+    "a\u2029b",
+    "a\n",
+    "a\n\n",
+    "\n",
+    "a\r\n\r\nb",
+    "a\r\r\nb",
+    "x\ud83d\ude00y \ud83d\ude00",
+    "one  two\tthree\u3000four"
+  ],
+  "slices": [
+    [
+      "abcdefghijkl",
+      0,
+      4
+    ],
+    [
+      "abcdefghijkl",
+      -2,
+      null
+    ],
+    [
+      "\ud83d\ude00\ud83d\ude00\ud83d\ude00abc",
+      0,
+      2
+    ],
+    [
+      "\ud83d\ude00\ud83d\ude00\ud83d\ude00abc",
+      -2,
+      null
+    ],
+    [
+      "ab\ud83d\ude00\ud83d\ude00cd",
+      1,
+      4
+    ],
+    [
+      "short",
+      0,
+      140
+    ],
+    [
+      "",
+      0,
+      4
+    ],
+    [
+      "abc",
+      -5,
+      null
+    ]
+  ],
+  "fixed": [
+    [
+      0.25,
+      1
+    ],
+    [
+      0.75,
+      1
+    ],
+    [
+      10.25,
+      1
+    ],
+    [
+      2.5,
+      0
+    ],
+    [
+      3.5,
+      0
+    ],
+    [
+      0.5,
+      0
+    ],
+    [
+      0.125,
+      2
+    ],
+    [
+      0.375,
+      2
+    ],
+    [
+      2.675,
+      2
+    ],
+    [
+      1.005,
+      2
+    ],
+    [
+      99.95,
+      1
+    ],
+    [
+      3.0,
+      2
+    ],
+    [
+      2.9999999999999996,
+      2
+    ],
+    [
+      100.0,
+      1
+    ],
+    [
+      0.0,
+      0
+    ],
+    [
+      1e-07,
+      2
+    ],
+    [
+      12.345,
+      1
+    ],
+    [
+      7.45,
+      1
+    ],
+    [
+      3.14159,
+      2
+    ],
+    [
+      2.0000000000000004,
+      1
+    ],
+    [
+      1234.5,
+      0
+    ],
+    [
+      0.05,
+      1
+    ],
+    [
+      0.15,
+      1
+    ],
+    [
+      0.35,
+      1
+    ]
+  ],
+  "sums": [
+    [
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1
+    ],
+    [
+      1e+16,
+      1.0,
+      -1e+16
+    ],
+    [
+      0.1,
+      0.2,
+      0.3
+    ],
+    [
+      1.5,
+      2,
+      3.25
+    ],
+    [],
+    [
+      5,
+      7
+    ],
+    [
+      12.3,
+      45.6,
+      7.8
+    ],
+    [
+      100.0,
+      1e-16,
+      -100.0
+    ],
+    [
+      2.33,
+      4.17,
+      1.0,
+      3.5,
+      2.08
+    ]
+  ],
+  "regex_probes": [
+    "",
+    "\n",
+    "eval(x)",
+    "eval (x)",
+    "eval\u001c(x)",
+    "eval\u0085(x)",
+    "eval\ufeff(x)",
+    "eval\u3000(x)",
+    "eval\u00a0(x)",
+    "eval\u2028(x)",
+    "model.eval(x)",
+    "\u540d\u524deval(x)",
+    "_eval(x)",
+    "x.innerHTML = y",
+    "x.innerHTML == y",
+    "SELECT * FROM t WHERE a = '' + b",
+    "select x from y where '' + z",
+    "\u017fELECT * FROM t WHERE a = '' + b",
+    "pass\u017fword = 'Xk9#mQ2vLp8$wZr4'",
+    "PR\u0130VATE_KEY = 'Zx8Qw2Lm5Np7Rt'",
+    "pr\u0131vate_key = 'Zx8Qw2Lm5Np7Rt'",
+    "api\u0345key = 'Zx8Qw2Lm5Np7Rt'",
+    "motDePass\u00e9Secret_password = 'Gh7#kL2$mN9@'",
+    "debugger;",
+    "  debugger  \n",
+    "debugger;\n\n",
+    "\u3000debugger",
+    "x // codeguard-ignore -- why",
+    "x # codeguard-ignore-next-line: CG-EVAL, cg-x",
+    "codeguard-ignored",
+    ": CG-EVAL , CG-X -- ok",
+    " -- why\n",
+    ": bad rule",
+    "requirements-dev.txt",
+    "requirements.txt\n",
+    "requirements.txt\n\n",
+    "requirements\u00e9.txt",
+    "flask[x]==1.0; os_name",
+    "require github.com/a/b v1.2.3",
+    "github.com/a/b v1.2.3 // c",
+    "v1.2.3",
+    "1.2.3-rc.1+b",
+    "\u0663.\u0664",
+    "lodash.merge: 1",
+    "'lodash.merge'\u3000=",
+    "lodashXmerge =",
+    "https://github.com/o/r/tree/main",
+    "https://github.com/o\u00e9/r",
+    "a // b /* c */ d",
+    "'a\\'b' \"c\" `d`",
+    "catch (e) { }",
+    "if (a && b || c ?? d) x ? y : z?.w",
+    "function f() {}\n  public static int g(int x) {",
+    "TODO: x",
+    "TODOS",
+    "x\ud83d\ude00\ud83d\ude00\ud83d\ude00eval(y)",
+    "AKIA000000000000000",
+    "aws_secret = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'"
+  ],
+  "is_comment": [
+    "// x",
+    "  # x",
+    "\t* x",
+    "/* x",
+    "-- x",
+    "x // y",
+    "",
+    "   ",
+    "\u001c// x",
+    "\ufeff// x",
+    "\u3000# x",
+    "\u0085-- x",
+    "*",
+    "#!/usr/bin/env node"
+  ],
+  "scan_patterns": [
+    [
+      "el.innerHTML = userInput;\nconst r = eval(code);\nmodel.eval();\n",
+      "a.js",
+      "javascript"
+    ],
+    [
+      "// eval(x)\n# eval(y)",
+      "a.js",
+      "javascript"
+    ],
+    [
+      "eval(x)",
+      "a.py",
+      "python"
+    ],
+    [
+      "q = f\"SELECT * FROM users WHERE id = {uid}\"\ncur.execute(\"SELECT * FROM t WHERE id = %s\", (uid,))\n",
+      "a.py",
+      "python"
+    ],
+    [
+      "system($x);\neval($y);",
+      "a.php",
+      "php"
+    ],
+    [
+      "eval(x)",
+      "a.json",
+      "json"
+    ]
+  ],
+  "scan_secrets": [
+    [
+      "a = 1\nKEY = \"__FAKE_AWS_KEY_ID__\"\nstripe = \"__FAKE_STRIPE_KEY__\"\n",
+      "cfg.py"
+    ],
+    [
+      "DB_PASSWORD = \"Xk9#mQ2vLp8$wZr4\"\npassword = \"aaaaaaaaaa\"\n",
+      "a.py"
+    ],
+    [
+      "api_key = \"${API_KEY}\"\nurl = \"__FAKE_DB_URL_PLACEHOLDER__\"\nurl2 = \"__FAKE_DB_URL__\"\n",
+      "a.py"
+    ]
+  ],
+  "entropy": [
+    "",
+    "a",
+    "aaaa",
+    "abcd",
+    "abcdefgh",
+    "Xk9#mQ2vLp8$wZr4",
+    "aabbccddeeffgghh",
+    "abcabcabcabc",
+    "Zr7wT4nBq9LmX2",
+    "\ud83d\ude00\ud83d\ude01\ud83d\ude02\ud83e\udd23ab12",
+    "Pr0dP4ss!",
+    "aab",
+    "the quick brown fox",
+    "0123456789abcdef0123"
+  ],
+  "redact": [
+    "",
+    "short",
+    "exactly10!",
+    "elevenchars",
+    "supersecretvalue",
+    "\ud83d\udd11\ud83d\udd11Kx9#mQ2vLp8",
+    "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00",
+    "ab\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+  ],
+  "looks_placeholder": [
+    "${API_KEY}",
+    "{{ token }}",
+    "<password>",
+    "YOUR_KEY",
+    "Example123",
+    "changeme!",
+    "xxxsecret",
+    "a***b",
+    "replace-me",
+    "TODO-later",
+    "NoneSuch",
+    "nullable",
+    "undefined1",
+    "abababab",
+    "abcabc",
+    "abcd",
+    "Xk9#mQ2vLp8$wZr4",
+    "process.env.X",
+    "os.environ",
+    "getenv(x)",
+    "redacted!",
+    "dummy-value",
+    "sample-key",
+    "placeholder"
+  ],
+  "suppressions": [
+    [
+      "a()  // codeguard-ignore\n# codeguard-ignore-next-line: CG-EVAL, bandit-b307 -- reviewed\nb()\n{/* codeguard-ignore */}\nc() /* codeguard-ignore: CG-EVAL */\n",
+      "a.js",
+      "javascript"
+    ],
+    [
+      "// codeguard-ignore-next-line: CG-EVAL -- demo only\nx\n",
+      "a.js",
+      "javascript"
+    ],
+    [
+      "eval(x); // codeguard-ignore CG-EVAL\neval(x); // codeguard-ignore(CG-EVAL)\n",
+      "a.js",
+      "javascript"
+    ],
+    [
+      "x // codeguard-ignore\r\ny\r\n",
+      "a.js",
+      "javascript"
+    ],
+    [
+      "<!-- codeguard-ignore-next-line -->\nx\n<!-- codeguard-ignore: CG-XSS -- ok -->",
+      "a.php",
+      "php"
+    ],
+    [
+      "callback: https://hooks.example/T1#codeguard-ignore\n",
+      "a.yml",
+      "config"
+    ],
+    [
+      "HELP = \"\"\"\nexample: token = \"x\"  # codeguard-ignore\n\"\"\"\nok()  # codeguard-ignore\n",
+      "a.py",
+      "python"
+    ],
+    [
+      "const t = `\n  eval(x) // codeguard-ignore\n`;\nok() // codeguard-ignore\n",
+      "a.ts",
+      "typescript"
+    ],
+    [
+      "const t = `\n  eval(x) // codeguard-ignore\n`;\n",
+      "a.go",
+      "go"
+    ],
+    [
+      "x = 1  # codeguard-ignore -- a                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            b\n",
+      "a.py",
+      "python"
+    ],
+    [
+      "y  # codeguard-ignore\nzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz # codeguard-ignore\n",
+      "a.py",
+      "python"
+    ],
+    [
+      "a # codeguard-ignore-next-line\n",
+      "a.py",
+      "python"
+    ],
+    [
+      "a # codeguard-ignore: X1, Y.2_z-3 -- why -- more\n",
+      "a.py",
+      "python"
+    ],
+    [
+      "a # codeguard-ignore: 1BAD\nb # codeguard-ignore: BAD-\nc # codeguard-ignore:\n",
+      "a.py",
+      "python"
+    ],
+    [
+      "a # codeguard-ignore -- \nb #codeguard-ignore--x\nc # codeguard-ignore --x\n",
+      "a.py",
+      "python"
+    ],
+    [
+      "s = 'it\\'s' # codeguard-ignore\nt = \"a\\\"b\" # codeguard-ignore\n",
+      "a.py",
+      "python"
+    ],
+    [
+      "abc#codeguard-ignore\nabc #codeguard-ignore\n(x)//codeguard-ignore\n",
+      "a.js",
+      "javascript"
+    ],
+    [
+      "x -- codeguard-ignore: CG-SQLI-CONCAT\nx --codeguard-ignore\n",
+      "a.sql",
+      "config"
+    ],
+    [
+      "# codeguard-ignore # codeguard-ignore: CG-EVAL\n",
+      "a.py",
+      "python"
+    ],
+    [
+      "x = 1  # \u3000codeguard-ignore\n",
+      "a.py",
+      "python"
+    ]
+  ],
+  "fingerprints": [
+    [
+      "CG-EVAL",
+      "a.js",
+      3,
+      "eval(x);",
+      null
+    ],
+    [
+      "CG-EVAL",
+      "a.js",
+      9,
+      "  eval(x);   // codeguard-ignore -- ok",
+      null
+    ],
+    [
+      "CG-EVAL",
+      "b.js",
+      3,
+      "eval(x);",
+      null
+    ],
+    [
+      "CG-EVAL",
+      "a.js",
+      3,
+      "\teval(x);\t#codeguard-ignore",
+      null
+    ],
+    [
+      "CG-EVAL",
+      "a.js",
+      4,
+      "",
+      "eval(x)"
+    ],
+    [
+      "CG-EVAL",
+      "a.js",
+      4,
+      null,
+      "eval(x)"
+    ],
+    [
+      "CG-EVAL",
+      "a.js",
+      5,
+      null,
+      null
+    ],
+    [
+      "OSV-GHSA-1",
+      "package.json",
+      null,
+      null,
+      "lodash@4.17.11"
+    ],
+    [
+      "SEC-GENERIC",
+      "c.py",
+      2,
+      "password = \"<secret>\"",
+      null
+    ],
+    [
+      "CG-EVAL",
+      "i18n/donn\u00e9es.js",
+      2,
+      "const \u53d8 = eval(\ud83d\ude00);",
+      null
+    ],
+    [
+      "CG-EVAL",
+      "a.js",
+      1,
+      "eval(x)\u3000\u0085 \u001c",
+      null
+    ],
+    [
+      "CG-EVAL",
+      "a.js",
+      1,
+      "eval(x)\ufeff",
+      null
+    ],
+    [
+      "CG-EVAL",
+      "a.js",
+      1,
+      "eval(x) {/* codeguard-ignore */}",
+      null
+    ],
+    [
+      "CG-EVAL",
+      "a.js",
+      1,
+      "eval(x) <!-- codeguard-ignore --> tail",
+      null
+    ],
+    [
+      "CG-EVAL",
+      "a.js",
+      1,
+      "eval(x) // codeguard-ignored",
+      null
+    ]
+  ],
+  "disambiguate": [
+    [
+      "B",
+      "a.js",
+      3,
+      "x"
+    ],
+    [
+      "A",
+      "a.js",
+      3,
+      "x"
+    ],
+    [
+      "A",
+      "a.js",
+      1,
+      "x"
+    ],
+    [
+      "A",
+      "b.js",
+      1,
+      "x"
+    ],
+    [
+      "A",
+      "a.js",
+      null,
+      "x"
+    ],
+    [
+      "A",
+      "a.js",
+      2,
+      "y"
+    ],
+    [
+      "A",
+      "a.js",
+      7,
+      "y"
+    ]
+  ],
+  "complexity": [
+    [
+      "",
+      "empty.js",
+      "javascript"
+    ],
+    [
+      "function f(x){ try { g() } catch (e) {} if (x && y || z) { return 1 } }",
+      "a.js",
+      "javascript"
+    ],
+    [
+      "def add(a, b):\n    return a + b\n",
+      "ok.py",
+      "python"
+    ],
+    [
+      "def (:\n",
+      "bad.py",
+      "python"
+    ],
+    [
+      "a = b // c\nif x:\n    y = {'k': {'v': 1}}\n",
+      "f.py",
+      "python"
+    ],
+    [
+      "x = a ? b : c; y = a?.b ?? c; z = a?.[0]; w = a ? .5 : 1;",
+      "t.ts",
+      "typescript"
+    ],
+    [
+      "if (a) {\nif (a) {\nif (a) {\nif (a) {\nif (a) {\nif (a) {\nif (a) {\nif (a) {\n}\n}\n}\n}\n}\n}\n}\n}\n",
+      "deep.js",
+      "javascript"
+    ],
+    [
+      "// TODO\n// TODO\n// TODO\n// TODO\n// TODO\n// TODO\nXXX FIXME HACK\n",
+      "t.go",
+      "go"
+    ],
+    [
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n",
+      "long.rb",
+      "ruby"
+    ],
+    [
+      "public static void main(String[] args) {\n  for (;;) { while (x) { if (y) {} } }\n}\n",
+      "M.java",
+      "java"
+    ],
+    [
+      "s = '{{{'; t = \"}}}\"; u = `{`; /* { */ v = { a: 1 }\n",
+      "s.js",
+      "javascript"
+    ],
+    [
+      "catch(e){}catch {} catch (x) { }\ncatch(e){}catch {} catch (x) { }\ncatch(e){}catch {} catch (x) { }\n",
+      "c.js",
+      "javascript"
+    ],
+    [
+      "fn a() {}\nfn b() { if x { if y { 1 } else { 2 } } }\n",
+      "r.rs",
+      "rust"
+    ],
+    [
+      "if (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nif (a) {}\nfunction f() {}\n",
+      "many.js",
+      "javascript"
+    ],
+    [
+      "const s = 'unterminated {\nlet x = { y: '}' }\n",
+      "u.js",
+      "javascript"
+    ]
+  ],
+  "clean_version": [
+    "4.17.11",
+    "^4.16.0",
+    "~7.12.3",
+    ">=1.2.0 <2",
+    "latest",
+    "file:../x",
+    "link:../y",
+    "workspace:*",
+    "git+https://x/y.git#v1.0.0",
+    "https://r.example/p-1.0.0.tgz",
+    "npm:react@18.2.0",
+    "1.x",
+    "*",
+    "2.0.0-beta.3",
+    "1.0.0+20130313144700",
+    "1.2.3.4.5",
+    "v1.2",
+    "=1.0.0",
+    "",
+    "github:o/r",
+    "1.2.3-",
+    "0.0.0-20200822124328-c89045814202",
+    "3.2.0rc1",
+    "1.0.0-alpha+build.1",
+    "16"
+  ],
+  "version_key": [
+    "4.17.11",
+    "4.17.12",
+    "1.2.6",
+    "0.2.4",
+    "1.0",
+    "2.0.0-beta.3",
+    "1.0.0+build",
+    "1.2.3.4.5",
+    "v1.2",
+    "1..2",
+    "",
+    "0.0.0-20200822124328-c89045814202",
+    "10.0.0",
+    "9.9",
+    "1.x"
+  ],
+  "manifests": [
+    [
+      "package.json",
+      "{\"dependencies\": {\"a\": \"1.0.0\"}, \"devDependencies\": null}"
+    ],
+    [
+      "package.json",
+      "{not json"
+    ],
+    [
+      "package.json",
+      "\ufeff{\"dependencies\": {\"a\": \"1.0.0\"}}"
+    ],
+    [
+      "package.json",
+      "{\"dependencies\": {\"a\": 1, \"b\": [\"2\"], \"c\": \"3.0.0\"}, \"dependencies2\": {\"x\": \"1\"}}"
+    ],
+    [
+      "requirements.txt",
+      "a==1\n\n  # c\nb[x,y] >= 2.0 ; python_version<'3'\nc\\\n"
+    ],
+    [
+      "requirements-test.txt",
+      "-c constraints.txt\nd~=1.4.2\ne<=3\nf>2\ng=1\n"
+    ],
+    [
+      "go.mod",
+      "require (\n  a.b/c v1.2.3\n)\nrequire a.b/d v0.1.0+incompatible\nrequire(\n x/y v1\n)\n"
+    ],
+    [
+      "sub/go.mod",
+      "require (\n\tgithub.com/x/y v1.0.0 // indirect\n// a/b v1\n)\n"
+    ]
+  ],
+  "cvss": [
+    "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+    "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+    "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N",
+    "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H/E:F/RL:O",
+    "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H",
+    "CVSS:3.1/AV:X/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:X/C:H/I:H/A:H",
+    "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/broken",
+    "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N",
+    "CVSS:2.0/AV:N/AC:L/Au:N/C:P/I:P/A:P",
+    "garbage",
+    "",
+    "CVSS:3.1",
+    "CVSS:3.1/",
+    "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  ],
+  "severity_scores": [
+    0.0,
+    0.1,
+    3.9,
+    4.0,
+    6.9,
+    6.99,
+    7.0,
+    8.9,
+    9.0,
+    10.0,
+    3.999999
+  ],
+  "grade_scores": [
+    100,
+    95,
+    90,
+    89.9,
+    80,
+    79.99,
+    70,
+    60.0,
+    59.9,
+    0,
+    -1
+  ],
+  "security_cases": [
+    [],
+    [
+      "low"
+    ],
+    [
+      "critical"
+    ],
+    [
+      "critical",
+      "critical",
+      "critical"
+    ],
+    [
+      "high",
+      "medium",
+      "low"
+    ],
+    [
+      "unknown"
+    ],
+    [
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "critical",
+      "low",
+      "low",
+      "low",
+      "low",
+      "low",
+      "low",
+      "low"
+    ],
+    [
+      "medium",
+      "medium",
+      "medium",
+      "medium",
+      "medium",
+      "medium",
+      "medium"
+    ]
+  ],
+  "health_cases": [
+    [
+      [],
+      0
+    ],
+    [
+      [],
+      5
+    ],
+    [
+      [
+        30.0,
+        15.5
+      ],
+      4
+    ],
+    [
+      [
+        100.0,
+        100.0,
+        100.0
+      ],
+      2
+    ],
+    [
+      [
+        12.3,
+        45.6,
+        7.8
+      ],
+      10
+    ],
+    [
+      [
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1
+      ],
+      3
+    ]
+  ],
+  "parse_vuln_extra": [
+    [
+      {
+        "id": "X-1",
+        "details": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      {
+        "name": "x",
+        "version": "",
+        "ecosystem": "npm",
+        "manifest": "package.json",
+        "dev": false,
+        "vulnerabilities": []
+      }
+    ],
+    [
+      {
+        "id": "X-2",
+        "summary": null,
+        "details": "  padded  ",
+        "severity": null,
+        "affected": null,
+        "references": null,
+        "database_specific": {
+          "severity": "moderate"
+        }
+      },
+      {
+        "name": "x",
+        "version": "1.0",
+        "ecosystem": "npm",
+        "manifest": "package.json",
+        "dev": false,
+        "vulnerabilities": []
+      }
+    ],
+    [
+      {
+        "id": "X-3",
+        "severity": [
+          {
+            "type": "CVSS_V3",
+            "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N"
+          },
+          {
+            "type": "CVSS_V3",
+            "score": "garbage"
+          }
+        ],
+        "affected": [
+          {
+            "package": {
+              "name": "X"
+            },
+            "ranges": [
+              {
+                "events": [
+                  {
+                    "fixed": "2.0"
+                  },
+                  {
+                    "fixed": "1.5"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "references": [
+          {
+            "type": "WEB",
+            "url": "https://a"
+          },
+          {
+            "type": "ADVISORY",
+            "url": "https://b"
+          }
+        ]
+      },
+      {
+        "name": "x",
+        "version": "1.0.0",
+        "ecosystem": "npm",
+        "manifest": "package.json",
+        "dev": false,
+        "vulnerabilities": []
+      }
+    ]
+  ],
+  "injected_deps": [
+    {
+      "name": "lodash",
+      "version": "4.17.11",
+      "ecosystem": "npm",
+      "manifest": "deps/package.json",
+      "dev": false,
+      "vulnerabilities": [
+        {
+          "id": "GHSA-a",
+          "aliases": [
+            "CVE-1"
+          ],
+          "summary": "first",
+          "severity": "high",
+          "cvss": 7.5,
+          "fixed_in": "4.17.12",
+          "url": null
+        },
+        {
+          "id": "GHSA-b",
+          "aliases": [],
+          "summary": "worse",
+          "severity": "critical",
+          "cvss": 9.1,
+          "fixed_in": "4.17.19",
+          "url": null
+        },
+        {
+          "id": "GHSA-c",
+          "aliases": [],
+          "summary": "",
+          "severity": "critical",
+          "cvss": 9.8,
+          "fixed_in": null,
+          "url": null
+        }
+      ]
+    },
+    {
+      "name": "@babel/core",
+      "version": "7.12.3",
+      "ecosystem": "npm",
+      "manifest": "deps/package.json",
+      "dev": false,
+      "vulnerabilities": [
+        {
+          "id": "GHSA-d",
+          "aliases": [],
+          "summary": "no fix",
+          "severity": "low",
+          "cvss": 0.0,
+          "fixed_in": null,
+          "url": null
+        }
+      ]
+    },
+    {
+      "name": "flask",
+      "version": "0.12.2",
+      "ecosystem": "PyPI",
+      "manifest": "deps/requirements.txt",
+      "dev": false,
+      "vulnerabilities": [
+        {
+          "id": "PYSEC-0",
+          "aliases": [
+            "CVE-0"
+          ],
+          "summary": "",
+          "severity": "medium",
+          "cvss": null,
+          "fixed_in": "1.0",
+          "url": null
+        },
+        {
+          "id": "PYSEC-1",
+          "aliases": [
+            "CVE-1"
+          ],
+          "summary": "",
+          "severity": "medium",
+          "cvss": null,
+          "fixed_in": "1.1",
+          "url": null
+        },
+        {
+          "id": "PYSEC-2",
+          "aliases": [
+            "CVE-2"
+          ],
+          "summary": "",
+          "severity": "medium",
+          "cvss": null,
+          "fixed_in": "1.2",
+          "url": null
+        },
+        {
+          "id": "PYSEC-3",
+          "aliases": [
+            "CVE-3"
+          ],
+          "summary": "",
+          "severity": "medium",
+          "cvss": null,
+          "fixed_in": "1.3",
+          "url": null
+        },
+        {
+          "id": "PYSEC-4",
+          "aliases": [
+            "CVE-4"
+          ],
+          "summary": "",
+          "severity": "medium",
+          "cvss": null,
+          "fixed_in": "1.4",
+          "url": null
+        },
+        {
+          "id": "PYSEC-5",
+          "aliases": [
+            "CVE-5"
+          ],
+          "summary": "",
+          "severity": "medium",
+          "cvss": null,
+          "fixed_in": "1.5",
+          "url": null
+        },
+        {
+          "id": "PYSEC-6",
+          "aliases": [
+            "CVE-6"
+          ],
+          "summary": "",
+          "severity": "medium",
+          "cvss": null,
+          "fixed_in": "1.6",
+          "url": null
+        }
+      ]
+    },
+    {
+      "name": "gone",
+      "version": "1.0.0",
+      "ecosystem": "Go",
+      "manifest": "missing/go.mod",
+      "dev": false,
+      "vulnerabilities": [
+        {
+          "id": "GO-1",
+          "aliases": [],
+          "summary": "  spaced  ",
+          "severity": "medium",
+          "cvss": null,
+          "fixed_in": null,
+          "url": null
+        }
+      ]
+    },
+    {
+      "name": "clean",
+      "version": "1.0.0",
+      "ecosystem": "npm",
+      "manifest": "deps/package.json",
+      "dev": false,
+      "vulnerabilities": []
+    }
+  ]
+}
