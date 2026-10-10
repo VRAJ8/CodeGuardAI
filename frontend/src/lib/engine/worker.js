@@ -8,6 +8,13 @@ import { LIMITS, pyStrip } from "./lang";
 import { SourceError, loadSource } from "./sources";
 import { ENGINE_VERSION, scan } from "./index";
 
+// OSV.dev's API does not answer cross-origin browser requests, so OSV calls go to this site's same-origin relay
+// (public/_redirects in production, the dev server's proxy locally), which forwards them to api.osv.dev unchanged.
+const OSV_API = "https://api.osv.dev/";
+export const OSV_RELAY = "/osv/";
+export const viaSiteRelay = (url, origin = globalThis.location?.origin) =>
+  origin && typeof url === "string" && url.startsWith(OSV_API) ? `${origin}${OSV_RELAY}${url.slice(OSV_API.length)}` : url;
+
 // Share of the progress bar the loader gets: a GitHub scan is mostly downloads, a local one mostly scanning.
 const LOAD_SHARE = { github: 45, zip: 15, files: 15 };
 
@@ -65,7 +72,7 @@ export function toAnalysis(report, source, job, { startedAt, finishedAt = new Da
  *  GitHub loader; it is not part of the result. */
 export async function runJob(job, onProgress = () => {}, { signal, fetchImpl } = {}) {
   const startedAt = new Date();
-  const http = fetchImpl || ((url, init) => globalThis.fetch(url, { ...init, signal }));
+  const http = fetchImpl || ((url, init) => globalThis.fetch(viaSiteRelay(url), { ...init, signal }));
   const share = LOAD_SHARE[job.kind] ?? 15;
   const source = await loadSource(job, {
     signal,

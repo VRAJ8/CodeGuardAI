@@ -84,6 +84,11 @@ if (config.enableVisualEdits && babelMetadataPlugin) {
 }
 
 webpackConfig.devServer = (devServerConfig) => {
+  // Same-origin OSV.dev relay for browser scans, mirroring the /osv/* rule in public/_redirects.
+  devServerConfig.proxy = [].concat(devServerConfig.proxy || [], {
+    context: ["/osv"], target: "https://api.osv.dev", changeOrigin: true, pathRewrite: { "^/osv": "" },
+  });
+
   // Apply visual edits dev server setup only if enabled
   if (config.enableVisualEdits && setupDevServer) {
     devServerConfig = setupDevServer(devServerConfig);

@@ -144,7 +144,7 @@ export default function LocalScan() {
 
             <label className="mt-4 flex items-start gap-3 text-[13px] cursor-pointer">
               <input type="checkbox" className="mt-0.5 w-4 h-4 accent-[#111]" checked={osv} onChange={(e) => setOsv(e.target.checked)} />
-              <span><b>Check dependencies against OSV.dev.</b> Sends package names and versions to api.osv.dev, never your code.</span>
+              <span><b>Check dependencies against OSV.dev.</b> Sends package names and versions to OSV.dev (relayed through this site), never your code.</span>
             </label>
             {error && <div role="alert" className="mt-4 p-3 rounded-[10px] border-2 border-ink bg-cherry/30 text-sm font-semibold">{error}</div>}
           </>
