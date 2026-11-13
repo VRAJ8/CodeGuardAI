@@ -22,7 +22,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, File, HTTPExce
 from fastapi.responses import JSONResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
-from pymongo.errors import PyMongoError
+from pymongo.errors import ConfigurationError, OperationFailure, PyMongoError, ServerSelectionTimeoutError
 from starlette.middleware.cors import CORSMiddleware
 
 from codeguard import __version__
@@ -618,23 +618,37 @@ async def root():
     return {"message": "CodeGuard AI API", "version": __version__}
 
 
-async def _database_ok() -> bool:
+def database_problem(exc: Exception) -> str:
+    """What a failed ping means for whoever set MONGO_URL. Never includes the driver's message, which can carry
+    hostnames and parts of the connection string."""
+    text = str(exc).lower()
+    if isinstance(exc, OperationFailure) or "auth" in text:
+        return "MongoDB rejected the username or password in MONGO_URL"
+    if isinstance(exc, ConfigurationError) or "dns" in text or "nameserver" in text:
+        return "the cluster address in MONGO_URL could not be found; copy the connection string again from Atlas"
+    if isinstance(exc, (ServerSelectionTimeoutError, asyncio.TimeoutError)):
+        return "the cluster didn't answer: allow 0.0.0.0/0 under Atlas Network Access and check the cluster isn't paused"
+    return f"the database check failed ({exc.__class__.__name__})"
+
+
+async def _database_status() -> Optional[str]:
+    """None when the database answers a ping, else the reason it doesn't."""
     try:
         await asyncio.wait_for(db.command("ping"), timeout=3)
-        return True
+        return None
     except Exception as e:  # unreachable, auth failure, paused cluster, timeout
         log.warning("database ping failed: %s", e.__class__.__name__)
-        return False
+        return database_problem(e)
 
 
 @api_router.get("/health")
 async def health():
     # Always 200 so a host's health check doesn't restart-loop the API over a database outage;
     # "database": false is the signal that logins and scans will fail.
-    database = await _database_ok()
+    problem = await _database_status()
     return {
-        "status": "healthy" if database else "degraded", "version": __version__, "database": database,
-        "config_errors": CONFIG_ERRORS,
+        "status": "healthy" if problem is None else "degraded", "version": __version__,
+        "database": problem is None, "database_error": problem, "config_errors": CONFIG_ERRORS,
         "engines": {"patterns": True, "secrets": True, "radon": True, "osv": True,
                     "bandit": bandit_available(), "semgrep": semgrep_available(), "ai": ai_enabled()},
     }

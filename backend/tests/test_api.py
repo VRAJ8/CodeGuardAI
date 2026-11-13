@@ -399,3 +399,17 @@ def test_quoted_cors_origins_are_accepted():
 def test_mongo_url_problem_names_the_mistake_without_echoing_it(url, hint):
     problem = server.mongo_url_problem(url)
     assert hint in problem and "Zq9" not in problem and "example.net" not in problem
+
+
+@pytest.mark.parametrize("exc,hint", [
+    (__import__("pymongo.errors", fromlist=["x"]).OperationFailure("bad auth : authentication failed", 8000), "username or password"),
+    (__import__("pymongo.errors", fromlist=["x"]).ConfigurationError("The DNS query name does not exist: _mongodb._tcp.x"), "could not be found"),
+    (__import__("pymongo.errors", fromlist=["x"]).ServerSelectionTimeoutError("cluster0-shard-00-00.x:27017: timed out"), "Network Access"),
+])
+def test_health_explains_why_the_database_is_unreachable(api, monkeypatch, exc, hint):
+    async def fail(*a, **kw):
+        raise exc
+    monkeypatch.setattr(type(server.db), "command", fail)
+    body = api.get("/api/health").json()
+    assert body["database"] is False and hint in body["database_error"]
+    assert "_mongodb" not in body["database_error"] and "27017" not in body["database_error"]
