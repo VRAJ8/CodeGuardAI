@@ -40,10 +40,21 @@ load_dotenv(ROOT_DIR / ".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("codeguard")
 
+def env_value(name: str, default: str = "") -> str:
+    """A setting as pasted into a host's dashboard: values copied from a .env file often keep their quotes."""
+    return os.environ.get(name, default).strip().strip("'\"").strip()
+
+
 # Fail fast when Mongo is unreachable (motor's default is 30s), so a login hits a clear 503, not a hang.
-client = AsyncIOMotorClient(os.environ.get("MONGO_URL", "mongodb://localhost:27017"),
-                            serverSelectionTimeoutMS=int(os.environ.get("MONGO_TIMEOUT_MS", "8000")))
-db = client[os.environ.get("DB_NAME", "codeguard")]
+MONGO_TIMEOUT_MS = int(os.environ.get("MONGO_TIMEOUT_MS", "8000"))
+CONFIG_ERRORS: List[str] = []  # reported by /api/health; never includes the setting's value
+try:
+    client = AsyncIOMotorClient(env_value("MONGO_URL", "mongodb://localhost:27017"), serverSelectionTimeoutMS=MONGO_TIMEOUT_MS)
+except Exception as e:  # a malformed MONGO_URL must not take the whole API down with it
+    log.error("MONGO_URL rejected: %s", e.__class__.__name__)
+    CONFIG_ERRORS.append(f"MONGO_URL is not a valid MongoDB connection string ({e.__class__.__name__})")
+    client = AsyncIOMotorClient("mongodb://mongo-url-invalid.invalid:27017", serverSelectionTimeoutMS=MONGO_TIMEOUT_MS)
+db = client[env_value("DB_NAME", "codeguard") or "codeguard"]
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 MAX_CONCURRENT_SCANS = 3
@@ -604,6 +615,7 @@ async def health():
     database = await _database_ok()
     return {
         "status": "healthy" if database else "degraded", "version": __version__, "database": database,
+        "config_errors": CONFIG_ERRORS,
         "engines": {"patterns": True, "secrets": True, "radon": True, "osv": True,
                     "bandit": bandit_available(), "semgrep": semgrep_available(), "ai": ai_enabled()},
     }
@@ -628,7 +640,8 @@ def cors_origins(raw: Optional[str]) -> List[str]:
     origin can read a signed-in visitor's data. "*" is dropped because Starlette answers credentialed
     requests by echoing whatever Origin asked, which would let any website read users' scans; a list
     that is only "*" (the old default) falls back to the defaults rather than locking the frontend out."""
-    listed = [o.strip().rstrip("/") for o in (raw or "").split(",") if o.strip() and o.strip() != "*"]
+    entries = (o.strip().strip("'\"").strip() for o in (raw or "").strip().strip("'\"").split(","))
+    listed = [o.rstrip("/") for o in entries if o and o != "*"]
     if raw and "*" in raw:
         log.warning("CORS_ORIGINS '*' ignored: list the frontend origins explicitly")
     return listed or DEFAULT_ORIGINS.split(",")
