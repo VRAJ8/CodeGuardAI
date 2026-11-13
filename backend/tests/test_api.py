@@ -413,3 +413,9 @@ def test_health_explains_why_the_database_is_unreachable(api, monkeypatch, exc, 
     body = api.get("/api/health").json()
     assert body["database"] is False and hint in body["database_error"]
     assert "_mongodb" not in body["database_error"] and "27017" not in body["database_error"]
+
+
+def test_atlas_integration_uri_wins_over_a_broken_mongo_url():
+    errors = _import_server_with({"MONGODB_URI": "mongodb+srv://u:p@cluster0.example.net/?appName=x",
+                                  "MONGO_URL": "https://cluster0.example.net/db"})
+    assert errors == "[]"
