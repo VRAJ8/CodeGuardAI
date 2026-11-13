@@ -355,12 +355,13 @@ def test_inline_scan_over_budget_fails_with_a_clear_reason(api, monkeypatch):
     assert "didn't finish within" in doc["error"] and "Browser scan" in doc["error"]
 
 
-def test_vercel_entrypoint_exposes_the_app():
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("vercel_index", Path(__file__).parent.parent / "api" / "index.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    assert mod.app is server.app
+def test_vercel_config_points_at_the_app_entrypoint():
+    # Vercel serves `app` from server.py itself (a supported entrypoint) and routes every path to it, so the
+    # config must not rewrite paths, and its functions entry must name that file.
+    import json
+    config = json.loads((Path(__file__).parent.parent / "vercel.json").read_text())
+    assert list(config["functions"]) == ["server.py"] and "rewrites" not in config
+    assert config["functions"]["server.py"]["maxDuration"] > server.INLINE_BUDGET
 
 
 # ---- settings pasted into a host's dashboard ------------------------------------------------------------
