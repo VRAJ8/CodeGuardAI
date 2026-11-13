@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -45,14 +46,32 @@ def env_value(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip().strip("'\"").strip()
 
 
+def mongo_url_problem(url: str) -> str:
+    """Why MONGO_URL was rejected, in words that never repeat any of it (it holds a password)."""
+    if not url.startswith(("mongodb://", "mongodb+srv://")):
+        return "it must start with mongodb+srv:// (or mongodb://), with nothing before it"
+    if any(c.isspace() for c in url):
+        return "it contains spaces or line breaks"
+    if "<" in url or ">" in url:
+        return "it still has a <placeholder>: put the real password there, without the < >"
+    rest = url.split("://", 1)[1]
+    userinfo = rest.rpartition("@")[0]
+    if userinfo and (userinfo.count(":") > 1 or any(c in userinfo for c in "@/?#[]")
+                     or re.search(r"%(?![0-9A-Fa-f]{2})", userinfo)):
+        return ("the username or password has characters that must be URL-encoded (@ : / ? # [ ] %); "
+                "regenerate a letters-and-numbers password in Atlas")
+    return "copy it again from Atlas > Connect > Drivers and swap in the password"
+
+
 # Fail fast when Mongo is unreachable (motor's default is 30s), so a login hits a clear 503, not a hang.
 MONGO_TIMEOUT_MS = int(os.environ.get("MONGO_TIMEOUT_MS", "8000"))
 CONFIG_ERRORS: List[str] = []  # reported by /api/health; never includes the setting's value
 try:
-    client = AsyncIOMotorClient(env_value("MONGO_URL", "mongodb://localhost:27017"), serverSelectionTimeoutMS=MONGO_TIMEOUT_MS)
+    client = AsyncIOMotorClient(env_value("MONGO_URL", "mongodb://localhost:27017"),
+                                serverSelectionTimeoutMS=MONGO_TIMEOUT_MS)
 except Exception as e:  # a malformed MONGO_URL must not take the whole API down with it
     log.error("MONGO_URL rejected: %s", e.__class__.__name__)
-    CONFIG_ERRORS.append(f"MONGO_URL is not a valid MongoDB connection string ({e.__class__.__name__})")
+    CONFIG_ERRORS.append(f"MONGO_URL is not a valid MongoDB connection string: {mongo_url_problem(env_value('MONGO_URL'))}")
     client = AsyncIOMotorClient("mongodb://mongo-url-invalid.invalid:27017", serverSelectionTimeoutMS=MONGO_TIMEOUT_MS)
 db = client[env_value("DB_NAME", "codeguard") or "codeguard"]
 

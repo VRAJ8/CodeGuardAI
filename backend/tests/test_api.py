@@ -386,3 +386,16 @@ def test_invalid_mongo_url_is_reported_instead_of_crashing_the_api():
 def test_quoted_cors_origins_are_accepted():
     assert server.cors_origins('"https://a.app"') == ["https://a.app"]
     assert server.cors_origins("'https://a.app/', \"https://b.app\"") == ["https://a.app", "https://b.app"]
+
+
+@pytest.mark.parametrize("url,hint", [
+    ("MONGO_URL=mongodb+srv://u:Zq9Secret@cluster0.example.net/", "must start with mongodb+srv://"),
+    ("mongodb+srv://u:Zq9Secret@cluster0.example.net/ ?appName=x", "spaces or line breaks"),
+    ("mongodb+srv://u:<Zq9Secret>@cluster0.example.net/", "<placeholder>"),
+    ("mongodb+srv://u:Zq9/Secret@cluster0.example.net/", "must be URL-encoded"),
+    ("mongodb+srv://u:Zq9@Secret@cluster0.example.net/", "must be URL-encoded"),
+    ("mongodb+srv://u:Zq9%Secret@cluster0.example.net/", "must be URL-encoded"),
+])
+def test_mongo_url_problem_names_the_mistake_without_echoing_it(url, hint):
+    problem = server.mongo_url_problem(url)
+    assert hint in problem and "Zq9" not in problem and "example.net" not in problem
