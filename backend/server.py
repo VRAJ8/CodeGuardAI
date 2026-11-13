@@ -65,13 +65,16 @@ def mongo_url_problem(url: str) -> str:
 
 # Fail fast when Mongo is unreachable (motor's default is 30s), so a login hits a clear 503, not a hang.
 MONGO_TIMEOUT_MS = int(os.environ.get("MONGO_TIMEOUT_MS", "8000"))
+# MONGODB_URI is what the MongoDB Atlas integration on Vercel provisions, so it wins over a hand-entered MONGO_URL.
+MONGO_SETTING = "MONGODB_URI" if env_value("MONGODB_URI") else "MONGO_URL"
 CONFIG_ERRORS: List[str] = []  # reported by /api/health; never includes the setting's value
 try:
-    client = AsyncIOMotorClient(env_value("MONGO_URL", "mongodb://localhost:27017"),
+    client = AsyncIOMotorClient(env_value(MONGO_SETTING, "mongodb://localhost:27017"),
                                 serverSelectionTimeoutMS=MONGO_TIMEOUT_MS)
-except Exception as e:  # a malformed MONGO_URL must not take the whole API down with it
-    log.error("MONGO_URL rejected: %s", e.__class__.__name__)
-    CONFIG_ERRORS.append(f"MONGO_URL is not a valid MongoDB connection string: {mongo_url_problem(env_value('MONGO_URL'))}")
+except Exception as e:  # a malformed connection string must not take the whole API down with it
+    log.error("%s rejected: %s", MONGO_SETTING, e.__class__.__name__)
+    CONFIG_ERRORS.append(f"{MONGO_SETTING} is not a valid MongoDB connection string: "
+                         f"{mongo_url_problem(env_value(MONGO_SETTING))}")
     client = AsyncIOMotorClient("mongodb://mongo-url-invalid.invalid:27017", serverSelectionTimeoutMS=MONGO_TIMEOUT_MS)
 db = client[env_value("DB_NAME", "codeguard") or "codeguard"]
 
@@ -623,9 +626,9 @@ def database_problem(exc: Exception) -> str:
     hostnames and parts of the connection string."""
     text = str(exc).lower()
     if isinstance(exc, OperationFailure) or "auth" in text:
-        return "MongoDB rejected the username or password in MONGO_URL"
+        return f"MongoDB rejected the username or password in {MONGO_SETTING}"
     if isinstance(exc, ConfigurationError) or "dns" in text or "nameserver" in text:
-        return "the cluster address in MONGO_URL could not be found; copy the connection string again from Atlas"
+        return f"the cluster address in {MONGO_SETTING} could not be found; copy the connection string again from Atlas"
     if isinstance(exc, (ServerSelectionTimeoutError, asyncio.TimeoutError)):
         return "the cluster didn't answer: allow 0.0.0.0/0 under Atlas Network Access and check the cluster isn't paused"
     return f"the database check failed ({exc.__class__.__name__})"
