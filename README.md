@@ -121,6 +121,9 @@ echo 'REACT_APP_BACKEND_URL=http://localhost:8000' > .env
 yarn install && yarn start
 ```
 
+### Deploy the API for free (Vercel)
+The API runs as a Vercel serverless function on the free Hobby plan ([`backend/vercel.json`](backend/vercel.json), entrypoint [`backend/api/index.py`](backend/api/index.py)). Import the repo in Vercel with **Root Directory `backend`**, and set `MONGO_URL`, `DB_NAME`, `CORS_ORIGINS` and optionally `GROQ_API_KEY`. On Vercel (`VERCEL=1`) or with `SCAN_INLINE=true`, a scan runs inside its request within `SCAN_INLINE_BUDGET` seconds (default 50), because serverless functions stop once they respond. Semgrep doesn't fit in a function, so cloud scans there run every other engine; the GitHub Action runs the full set.
+
 ### Tests & lint
 ```bash
 cd backend && pytest -q && ruff check .

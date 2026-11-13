@@ -61,7 +61,11 @@ export default function NewAnalysis() {
       toast.success("Scan started 🚀");
       navigate(`/analysis/${res.data.analysis_id}`);
     } catch (err) {
-      setError(err.response?.data?.detail || "Couldn't start the scan");
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === "string" ? detail
+        : err.response?.status === 413 ? "This ZIP is too big for the cloud server. Browser scan handles big ZIPs right on your device."
+        : !err.response ? "Can't reach the CodeGuard API right now. Browser scan works without it."
+        : "Couldn't start the scan");
       setLoading(false);
     }
   };

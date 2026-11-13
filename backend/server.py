@@ -40,10 +40,21 @@ load_dotenv(ROOT_DIR / ".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("codeguard")
 
+def env_value(name: str, default: str = "") -> str:
+    """A setting as pasted into a host's dashboard: values copied from a .env file often keep their quotes."""
+    return os.environ.get(name, default).strip().strip("'\"").strip()
+
+
 # Fail fast when Mongo is unreachable (motor's default is 30s), so a login hits a clear 503, not a hang.
-client = AsyncIOMotorClient(os.environ.get("MONGO_URL", "mongodb://localhost:27017"),
-                            serverSelectionTimeoutMS=int(os.environ.get("MONGO_TIMEOUT_MS", "8000")))
-db = client[os.environ.get("DB_NAME", "codeguard")]
+MONGO_TIMEOUT_MS = int(os.environ.get("MONGO_TIMEOUT_MS", "8000"))
+CONFIG_ERRORS: List[str] = []  # reported by /api/health; never includes the setting's value
+try:
+    client = AsyncIOMotorClient(env_value("MONGO_URL", "mongodb://localhost:27017"), serverSelectionTimeoutMS=MONGO_TIMEOUT_MS)
+except Exception as e:  # a malformed MONGO_URL must not take the whole API down with it
+    log.error("MONGO_URL rejected: %s", e.__class__.__name__)
+    CONFIG_ERRORS.append(f"MONGO_URL is not a valid MongoDB connection string ({e.__class__.__name__})")
+    client = AsyncIOMotorClient("mongodb://mongo-url-invalid.invalid:27017", serverSelectionTimeoutMS=MONGO_TIMEOUT_MS)
+db = client[env_value("DB_NAME", "codeguard") or "codeguard"]
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 MAX_CONCURRENT_SCANS = 3
@@ -63,6 +74,13 @@ async def expire_stale_scans(user_id: Optional[str] = None) -> int:
         "status": "failed", "error": STALE_SCAN_ERROR, "progress": {"stage": "Failed", "pct": 100}}})
     return result.modified_count
 ALLOW_DEV_LOGIN = os.environ.get("ALLOW_DEV_LOGIN", "").lower() == "true"
+# Serverless hosts (Vercel sets VERCEL=1) stop a function once its response is sent, so a background task would never
+# finish there: scans run inside the request instead, within a budget below the host's time limit. Clients poll the
+# same document either way.
+SCAN_INLINE = os.environ.get("SCAN_INLINE", "").lower() == "true" or os.environ.get("VERCEL") == "1"
+INLINE_BUDGET = float(os.environ.get("SCAN_INLINE_BUDGET", "50"))
+INLINE_TIMEOUT_ERROR = ("The scan didn't finish within {:.0f}s on this server. Browser scan handles big repos, and the "
+                        "GitHub Action runs the full engine in CI.")
 
 
 @asynccontextmanager
@@ -309,6 +327,18 @@ async def _fail(analysis_id: str, message: str):
     await db.analyses.update_one({"analysis_id": analysis_id}, {"$set": {
         "status": "failed", "error": message, "ai_summary": message, "progress": {"stage": "Failed", "pct": 100}}})
 
+async def _start_scan(background: BackgroundTasks, analysis_id: str, *args) -> str:
+    """Run the scan after the response, or (SCAN_INLINE) before it. Returns the scan's status to report."""
+    if not SCAN_INLINE:
+        background.add_task(run_pipeline, analysis_id, *args)
+        return "processing"
+    try:
+        await asyncio.wait_for(run_pipeline(analysis_id, *args), INLINE_BUDGET)
+    except asyncio.TimeoutError:
+        await _fail(analysis_id, INLINE_TIMEOUT_ERROR.format(INLINE_BUDGET))
+    doc = await db.analyses.find_one({"analysis_id": analysis_id}, {"_id": 0, "status": 1})
+    return doc["status"] if doc else "failed"
+
 # ==================== ANALYSIS ENDPOINTS ====================
 
 @analysis_router.post("/github", status_code=202)
@@ -324,8 +354,8 @@ async def analyze_github(req: AnalysisRequest, background: BackgroundTasks, user
     name = req.name or f"{owner}/{repo}"
     url = req.github_url.strip()
     await db.analyses.insert_one(_new_doc(analysis_id, user, name, "github", url))
-    background.add_task(run_pipeline, analysis_id, user.user_id, name, url)
-    return {"analysis_id": analysis_id, "status": "processing"}
+    status = await _start_scan(background, analysis_id, user.user_id, name, url)
+    return {"analysis_id": analysis_id, "status": status}
 
 
 @analysis_router.post("/upload", status_code=202)
@@ -340,8 +370,8 @@ async def analyze_upload(background: BackgroundTasks, file: UploadFile = File(..
     analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
     name = Path(file.filename).stem
     await db.analyses.insert_one(_new_doc(analysis_id, user, name, "zip", None))
-    background.add_task(run_pipeline, analysis_id, user.user_id, name, None, data)
-    return {"analysis_id": analysis_id, "status": "processing"}
+    status = await _start_scan(background, analysis_id, user.user_id, name, None, data)
+    return {"analysis_id": analysis_id, "status": status}
 
 
 LIST_PROJECTION = {"_id": 0, "ai_refactors": 0, "ai_fixes": 0, "dependencies": 0, "bug_risks": 0, "suppressed_issues": 0}
@@ -585,6 +615,7 @@ async def health():
     database = await _database_ok()
     return {
         "status": "healthy" if database else "degraded", "version": __version__, "database": database,
+        "config_errors": CONFIG_ERRORS,
         "engines": {"patterns": True, "secrets": True, "radon": True, "osv": True,
                     "bandit": bandit_available(), "semgrep": semgrep_available(), "ai": ai_enabled()},
     }
@@ -609,7 +640,8 @@ def cors_origins(raw: Optional[str]) -> List[str]:
     origin can read a signed-in visitor's data. "*" is dropped because Starlette answers credentialed
     requests by echoing whatever Origin asked, which would let any website read users' scans; a list
     that is only "*" (the old default) falls back to the defaults rather than locking the frontend out."""
-    listed = [o.strip().rstrip("/") for o in (raw or "").split(",") if o.strip() and o.strip() != "*"]
+    entries = (o.strip().strip("'\"").strip() for o in (raw or "").strip().strip("'\"").split(","))
+    listed = [o.rstrip("/") for o in entries if o and o != "*"]
     if raw and "*" in raw:
         log.warning("CORS_ORIGINS '*' ignored: list the frontend origins explicitly")
     return listed or DEFAULT_ORIGINS.split(",")
