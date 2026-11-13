@@ -328,3 +328,36 @@ def test_cors_never_lets_other_sites_read_a_signed_in_users_data(api):
 ])
 def test_cors_origins_are_always_explicit(raw, expected):
     assert server.cors_origins(raw) == expected
+
+
+# ---- serverless (inline) scans ------------------------------------------------------------------------
+
+def test_inline_scan_finishes_inside_the_request(api, monkeypatch):
+    monkeypatch.setattr(server, "SCAN_INLINE", True)
+    login(api)
+    r = api.post("/api/analysis/upload", files={"file": ("demo.zip", fixture_zip(), "application/zip")})
+    assert r.status_code == 202 and r.json()["status"] == "completed"
+    assert api.get(f"/api/analysis/{r.json()['analysis_id']}").json()["grade"]
+
+
+def test_inline_scan_over_budget_fails_with_a_clear_reason(api, monkeypatch):
+    import asyncio
+
+    async def slow(*args):
+        await asyncio.sleep(5)
+    monkeypatch.setattr(server, "SCAN_INLINE", True)
+    monkeypatch.setattr(server, "INLINE_BUDGET", 0.05)
+    monkeypatch.setattr(server, "run_pipeline", slow)
+    login(api)
+    r = api.post("/api/analysis/upload", files={"file": ("demo.zip", fixture_zip(), "application/zip")})
+    assert r.json()["status"] == "failed"
+    doc = api.get(f"/api/analysis/{r.json()['analysis_id']}").json()
+    assert "didn't finish within" in doc["error"] and "Browser scan" in doc["error"]
+
+
+def test_vercel_entrypoint_exposes_the_app():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vercel_index", Path(__file__).parent.parent / "api" / "index.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.app is server.app

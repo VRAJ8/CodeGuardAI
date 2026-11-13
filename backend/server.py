@@ -63,6 +63,13 @@ async def expire_stale_scans(user_id: Optional[str] = None) -> int:
         "status": "failed", "error": STALE_SCAN_ERROR, "progress": {"stage": "Failed", "pct": 100}}})
     return result.modified_count
 ALLOW_DEV_LOGIN = os.environ.get("ALLOW_DEV_LOGIN", "").lower() == "true"
+# Serverless hosts (Vercel sets VERCEL=1) stop a function once its response is sent, so a background task would never
+# finish there: scans run inside the request instead, within a budget below the host's time limit. Clients poll the
+# same document either way.
+SCAN_INLINE = os.environ.get("SCAN_INLINE", "").lower() == "true" or os.environ.get("VERCEL") == "1"
+INLINE_BUDGET = float(os.environ.get("SCAN_INLINE_BUDGET", "50"))
+INLINE_TIMEOUT_ERROR = ("The scan didn't finish within {:.0f}s on this server. Browser scan handles big repos, and the "
+                        "GitHub Action runs the full engine in CI.")
 
 
 @asynccontextmanager
@@ -309,6 +316,18 @@ async def _fail(analysis_id: str, message: str):
     await db.analyses.update_one({"analysis_id": analysis_id}, {"$set": {
         "status": "failed", "error": message, "ai_summary": message, "progress": {"stage": "Failed", "pct": 100}}})
 
+async def _start_scan(background: BackgroundTasks, analysis_id: str, *args) -> str:
+    """Run the scan after the response, or (SCAN_INLINE) before it. Returns the scan's status to report."""
+    if not SCAN_INLINE:
+        background.add_task(run_pipeline, analysis_id, *args)
+        return "processing"
+    try:
+        await asyncio.wait_for(run_pipeline(analysis_id, *args), INLINE_BUDGET)
+    except asyncio.TimeoutError:
+        await _fail(analysis_id, INLINE_TIMEOUT_ERROR.format(INLINE_BUDGET))
+    doc = await db.analyses.find_one({"analysis_id": analysis_id}, {"_id": 0, "status": 1})
+    return doc["status"] if doc else "failed"
+
 # ==================== ANALYSIS ENDPOINTS ====================
 
 @analysis_router.post("/github", status_code=202)
@@ -324,8 +343,8 @@ async def analyze_github(req: AnalysisRequest, background: BackgroundTasks, user
     name = req.name or f"{owner}/{repo}"
     url = req.github_url.strip()
     await db.analyses.insert_one(_new_doc(analysis_id, user, name, "github", url))
-    background.add_task(run_pipeline, analysis_id, user.user_id, name, url)
-    return {"analysis_id": analysis_id, "status": "processing"}
+    status = await _start_scan(background, analysis_id, user.user_id, name, url)
+    return {"analysis_id": analysis_id, "status": status}
 
 
 @analysis_router.post("/upload", status_code=202)
@@ -340,8 +359,8 @@ async def analyze_upload(background: BackgroundTasks, file: UploadFile = File(..
     analysis_id = f"analysis_{uuid.uuid4().hex[:12]}"
     name = Path(file.filename).stem
     await db.analyses.insert_one(_new_doc(analysis_id, user, name, "zip", None))
-    background.add_task(run_pipeline, analysis_id, user.user_id, name, None, data)
-    return {"analysis_id": analysis_id, "status": "processing"}
+    status = await _start_scan(background, analysis_id, user.user_id, name, None, data)
+    return {"analysis_id": analysis_id, "status": status}
 
 
 LIST_PROJECTION = {"_id": 0, "ai_refactors": 0, "ai_fixes": 0, "dependencies": 0, "bug_risks": 0, "suppressed_issues": 0}

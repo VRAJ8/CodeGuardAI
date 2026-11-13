@@ -1,7 +1,9 @@
 import axios from "axios";
 import { toast } from "sonner";
 
-export const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+// Empty means same origin: the site's /api/* rule in public/_redirects forwards to the API, which keeps the session
+// cookie first-party (browsers that block third-party cookies still sign in).
+export const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
 export const API = `${BACKEND_URL}/api`;
 export const DEV_LOGIN = process.env.REACT_APP_DEV_LOGIN === "true";
 
