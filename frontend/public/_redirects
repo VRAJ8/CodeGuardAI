@@ -1,2 +1,5 @@
-/osv/*  https://api.osv.dev/:splat  200
-/*      /index.html                 200
+/api/*         https://code-guard-ai-two.vercel.app/api/:splat        200
+/docs          https://code-guard-ai-two.vercel.app/docs              200
+/openapi.json  https://code-guard-ai-two.vercel.app/openapi.json      200
+/osv/*         https://api.osv.dev/:splat                             200
+/*             /index.html                                            200

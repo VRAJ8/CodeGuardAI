@@ -122,7 +122,7 @@ yarn install && yarn start
 ```
 
 ### Deploy the API for free (Vercel)
-The API runs as a Vercel serverless function on the free Hobby plan: Vercel serves the FastAPI `app` from `backend/server.py` as-is ([`backend/vercel.json`](backend/vercel.json) only sets the time limit and excludes tests). Import the repo in Vercel with **Root Directory `backend`**, and set `MONGO_URL`, `DB_NAME`, `CORS_ORIGINS` and optionally `GROQ_API_KEY`. On Vercel (`VERCEL=1`) or with `SCAN_INLINE=true`, a scan runs inside its request within `SCAN_INLINE_BUDGET` seconds (default 50), because serverless functions stop once they respond. Semgrep doesn't fit in a function, so cloud scans there run every other engine; the GitHub Action runs the full set.
+The API runs as a Vercel serverless function on the free Hobby plan: Vercel serves the FastAPI `app` from `backend/server.py` as-is ([`backend/vercel.json`](backend/vercel.json) only sets the time limit and excludes tests). Import the repo in Vercel with **Root Directory `backend`**, and set `MONGO_URL`, `DB_NAME`, `CORS_ORIGINS` and optionally `GROQ_API_KEY`. On Vercel (`VERCEL=1`) or with `SCAN_INLINE=true`, a scan runs inside its request within `SCAN_INLINE_BUDGET` seconds (default 50), because serverless functions stop once they respond. Semgrep doesn't fit in a function, so cloud scans there run every other engine; the GitHub Action runs the full set. The site reaches the API through same-origin rewrites in [`frontend/public/_redirects`](frontend/public/_redirects) (`/api/*`, `/docs`), so the session cookie is first-party; leave `REACT_APP_BACKEND_URL` unset in Netlify.
 
 ### Tests & lint
 ```bash
